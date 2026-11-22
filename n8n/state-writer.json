@@ -1,0 +1,1031 @@
+{
+  "name": "Desert Comfort State Writer",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "sw-00",
+      "name": "Receive State Event",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize Event - cleans and validates what the caller passed. Never throws: bad input becomes `invalid`.\nconst src = $input.first().json || {};\nconst clean = (v) => String(v === undefined || v === null ? '' : v).trim();\n\nconst event = clean(src.event).toLowerCase();\nconst source = clean(src.source) || 'unknown';\nconst contact_id = clean(src.contact_id);\nconst phone = clean(src.phone);\nconst occurred_at = clean(src.occurred_at) || new Date().toISOString();\nconst event_id = clean(src.event_id) || `${source}:${contact_id}:${event}:${Date.now()}`;\n\nlet detail = src.detail;\nif (typeof detail === 'string') { try { detail = JSON.parse(detail); } catch (e) { detail = {}; } }\nif (!detail || typeof detail !== 'object') detail = {};\n\nlet invalid = '';\nif (!event) invalid = 'missing event';\nelse if (!contact_id) invalid = 'missing contact_id';\nelse if (!/^[A-Za-z0-9]{10,40}$/.test(contact_id)) invalid = 'contact_id is not a valid GHL id';\nelse if (Number.isNaN(Date.parse(occurred_at))) invalid = 'occurred_at is not a valid date';\n\nconst base = `dc-statewriter:${source}:${event_id}:${event}`;\nreturn [{ json: { event, source, contact_id, phone, event_id, occurred_at, detail, invalid, done_key: `${base}:done`, lease_key: `${base}:lease` } }];\n"
+      },
+      "id": "sw-01",
+      "name": "Normalize Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "doneValue",
+        "key": "={{ $('Normalize Event').first().json.done_key }}",
+        "keyType": "string",
+        "options": {}
+      },
+      "id": "sw-02",
+      "name": "Check Event Done (Redis)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        480,
+        0
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "incr",
+        "key": "={{ $('Normalize Event').first().json.lease_key }}",
+        "expire": true,
+        "ttl": 120
+      },
+      "id": "sw-03",
+      "name": "Claim Event Lease (Redis)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        720,
+        0
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize Claim - fail-open duplicate check (same design as the call-end guard): only POSITIVE evidence of a duplicate\n// (done mark present, or the lease already held) drops an event. Redis down or odd output lets the event through.\nconst done = $('Check Event Done (Redis)').first().json.doneValue;\nconst lease = $('Claim Event Lease (Redis)').first().json;\nconst nums = Object.values(lease || {}).filter((v) => typeof v === 'number');\nconst leaseCount = nums.length ? nums[0] : null;\nconst alreadyDone = done === 'true' || done === true;\nconst leaseTaken = leaseCount !== null && leaseCount > 1;\nreturn [{ json: { is_new: !(alreadyDone || leaseTaken), already_done: alreadyDone, lease_count: leaseCount } }];\n"
+      },
+      "id": "sw-04",
+      "name": "Normalize Claim",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.is_new }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "sw-05",
+      "name": "If Event Is New",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_CONFIG_TABLE_ID"
+        },
+        "returnAll": true
+      },
+      "id": "sw-06",
+      "name": "Get Config Rows",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        1440,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate Config - collapse the config table rows into ONE item so the next Data Table node runs once.\nreturn [{ json: { rows: $input.all().map((i) => i.json).filter((r) => r && r.key) } }];\n"
+      },
+      "id": "sw-07",
+      "name": "Aggregate Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_STAGE_TRANSITIONS_TABLE_ID"
+        },
+        "returnAll": true
+      },
+      "id": "sw-08",
+      "name": "Get Transition Rows",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "position": [
+        1920,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate Transitions - collapse the stage-rules table rows into ONE item.\nreturn [{ json: { rows: $input.all().map((i) => i.json).filter((r) => r && r.event) } }];\n"
+      },
+      "id": "sw-09",
+      "name": "Aggregate Transitions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ encodeURIComponent($('Normalize Event').first().json.contact_id) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "sw-10",
+      "name": "Get Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "position": [
+        2400,
+        -128
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ encodeURIComponent($('Normalize Event').first().json.contact_id) }}/appointments",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "sw-11",
+      "name": "Get Contact Appointments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "position": [
+        2640,
+        -128
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Decide State Change - Desert Comfort State Writer.\n// Pure decision logic: reads everything through explicit node references, writes NOTHING itself.\n// Rules: unknown means stop (alert, no write); forward-only stages; Do-Not-Disturb is only ever SET here, never\n// cleared; booked/served are never demoted by call outcomes; a cancelled appointment demotes booked only when no\n// other live future appointment exists.\nconst get = (name) => { try { return $(name).first().json; } catch (e) { return null; } };\n\nconst CANON = ['contact', 'lead', 'qualified', 'booked', 'served', 'dormant', 'disqualified'];\nconst ev = get('Normalize Event') || {};\nconst cfgRows = ((get('Aggregate Config') || {}).rows) || [];\nconst trans = ((get('Aggregate Transitions') || {}).rows) || [];\nconst cfg = {};\nfor (const r of cfgRows) { if (r && r.key) cfg[String(r.key).trim()] = r.value; }\n\nconst csv = (s) => String(s === undefined || s === null ? '' : s).split(',').map((x) => x.trim()).filter(Boolean);\nconst tz = cfg.timezone || 'UTC';\nconst calIds = csv(cfg.appointment_calendar_ids);\nconst dndChannels = csv(cfg.dnd_channels_on_do_not_call);\nconst legacyBooked = csv(cfg.legacy_booked_statuses);\n\nconst result = {\n  decision: '', reason: '', from_stage: '', to_stage: '', write_stage: false, set_dnd: false,\n  stage_body: null, dnd_body: null, last_service_date: '', alert: false, alert_text: '', retryable: false,\n  event: ev.event || '', event_id: ev.event_id || '', source: ev.source || '', phone: ev.phone || '', contact_id: ev.contact_id || '',\n};\n// A contact whose stage was only DERIVED from a meaningful old lead status (booked / qualified / out of area) must have that\n// stage saved on first touch whatever the decision is: the call's own update overwrites the old status right after, and the\n// evidence (for example \"this is a booked customer\") would be lost for good. Brand-new contacts with no old status are left alone.\nlet legacyStage = '';\nconst PERSIST_LEGACY_ON = ['no_change', 'dnd_set', 'skipped_not_allowed', 'skipped_has_future_appointment'];\nconst done = (decision, reason, extra) => {\n  Object.assign(result, { decision, reason }, extra || {});\n  if (legacyStage && !result.write_stage && !result.alert && PERSIST_LEGACY_ON.includes(decision)) {\n    result.write_stage = true;\n    result.stage_body = { customFields: [{ key: cfg.stage_field_key, fieldValue: legacyStage }] };\n    result.reason += ` (legacy stage '${legacyStage}' saved)`;\n  }\n  return [{ json: result }];\n};\nconst alertWith = (decision, reason, text, retryable) => done(decision, reason, { alert: true, alert_text: text, retryable: Boolean(retryable) });\n\nif (ev.invalid) return alertWith('invalid_input', ev.invalid, `State Writer got an invalid event: ${ev.invalid}.`);\n\nconst missingCfg = ['location_id', 'stage_field_key', 'stage_field_id', 'last_service_date_field_key'].filter((k) => !cfg[k]);\nif (missingCfg.length) {\n  return alertWith('config_missing', `config keys missing: ${missingCfg.join(', ')}`,\n    `State Writer config is missing ${missingCfg.join(', ')}. Event ${ev.event} for contact ${ev.contact_id} NOT applied (it will be retried).`, true);\n}\n\nconst cr = get('Get Contact') || {};\nif (cr.statusCode !== 200 || !cr.body || !cr.body.contact) {\n  return alertWith('contact_not_found', `GET contact returned ${cr.statusCode}`,\n    `State Writer could not read contact ${ev.contact_id} (HTTP ${cr.statusCode}). Event ${ev.event} NOT applied (it will be retried).`, true);\n}\nconst contact = cr.body.contact;\nconst fields = contact.customFields || [];\nconst fieldVal = (id) => { const f = fields.find((x) => x.id === id); return f ? (f.value !== undefined ? f.value : f.fieldValue) : null; };\nlet stage = String(fieldVal(cfg.stage_field_id) || '').trim().toLowerCase();\nconst leadStatus = String(fieldVal(cfg.lead_status_field_id) || '').trim().toLowerCase();\n\n// Contacts created before the stage field existed: derive a starting stage from the old status field.\nlet derived = false;\nif (!stage) {\n  derived = true;\n  if (legacyBooked.includes(leadStatus)) stage = 'booked';\n  else if (leadStatus === 'qualified_not_booked') stage = 'qualified';\n  else if (leadStatus === 'out_of_area') stage = 'disqualified';\n  else stage = 'contact';\n  if (stage !== 'contact') legacyStage = stage;\n}\nresult.from_stage = stage;\n\nif (!CANON.includes(stage)) {\n  return alertWith('blocked_unmapped_stage', `stage value '${stage}' is not a known stage`,\n    `Contact ${ev.contact_id} has stage '${stage}', which is not a known stage. Event ${ev.event} NOT applied. Someone may have edited the stage field.`);\n}\n\nconst row = trans.find((t) => t && String(t.event).trim() === ev.event);\nif (!row) {\n  return alertWith('unknown_event', `no rule for event '${ev.event}'`, `State Writer has no rule for event '${ev.event}' (contact ${ev.contact_id}). Nothing applied.`);\n}\n\n// Appointment events: only the configured calendars drive state (other builds share the sub-account).\nconst appt = (ev.detail && ev.detail.appointment) || null;\nif (ev.source === 'appointment_status' && appt && appt.calendar_id && calIds.length && !calIds.includes(appt.calendar_id)) {\n  return done('ignored_other_calendar', 'appointment is on a calendar this client does not use');\n}\n\nconst action = String(row.action || '').trim();\nif (action === 'none') return done('no_change', 'known event, no stage change');\n\nif (action === 'dnd') {\n  const dnd = contact.dndSettings || {};\n  const need = dndChannels.filter((c) => !(dnd[c] && dnd[c].status === 'active'));\n  if (!need.length) return done('no_change', 'Do-Not-Disturb already active on all required channels');\n  const body = { dndSettings: {} };\n  for (const c of dndChannels) body.dndSettings[c] = { status: 'active', message: 'ConvertEcho: do-not-call outcome', code: 'CONVERTECHO_DNC' };\n  return done('dnd_set', `Do-Not-Disturb set on ${dndChannels.join(' and ')}`, { set_dnd: true, dnd_body: body });\n}\n\nif (action !== 'stage') {\n  return alertWith('unknown_event', `rule for '${ev.event}' has unknown action '${action}'`, `Rule for '${ev.event}' has unknown action '${action}'. Nothing applied.`);\n}\n\nconst toStage = String(row.to_stage || '').trim();\nif (!CANON.includes(toStage)) {\n  return alertWith('unknown_event', `rule for '${ev.event}' targets unknown stage '${toStage}'`, `Rule for '${ev.event}' targets unknown stage '${toStage}'. Nothing applied.`);\n}\nconst from = csv(row.from_stages);\nif (!(from.includes('*') || from.includes(stage))) {\n  return done('skipped_not_allowed', `'${ev.event}' is not allowed from stage '${stage}' (would have gone to '${toStage}')`, { to_stage: stage });\n}\n\n// Conditional demotion: only when no other live future appointment exists (booked means a live future appointment).\nif (String(row.condition || '').trim() === 'no_future_appointment') {\n  const ar = get('Get Contact Appointments') || {};\n  if (ar.statusCode !== 200) {\n    return alertWith('appointments_unreadable', `GET appointments returned ${ar.statusCode}`,\n      `State Writer could not read appointments for contact ${ev.contact_id} (HTTP ${ar.statusCode}). Not demoting on '${ev.event}' (it will be retried).`, true);\n  }\n  const events = (ar.body && ar.body.events) || [];\n  const nowMs = Date.parse(ev.occurred_at) || Date.now();\n  const dead = ['cancelled', 'canceled', 'noshow', 'invalid'];\n  const live = events.filter((a) =>\n    (!calIds.length || calIds.includes(a.calendarId)) &&\n    Date.parse(a.startTime) > nowMs &&\n    !dead.includes(String(a.appointmentStatus || a.appoinmentStatus || a.status || '').toLowerCase().replace(/[^a-z]/g, '')) &&\n    !(appt && appt.id && a.id === appt.id));\n  if (live.length) return done('skipped_has_future_appointment', `contact still has ${live.length} live future appointment(s), stays ${stage}`, { to_stage: stage });\n}\n\n// Last service date: written whenever a contact becomes (or already is) served from a visit event.\nlet lastDate = '';\nif (toStage === 'served') {\n  const when = (appt && appt.start_time) || ev.occurred_at || new Date().toISOString();\n  const d = new Date(when);\n  lastDate = isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-CA', { timeZone: tz });\n}\n\nconst needStage = stage !== toStage || derived;\nif (!needStage && !lastDate) return done('no_change', `already ${toStage}`, { to_stage: toStage });\n\nconst cf = [];\nif (needStage) cf.push({ key: cfg.stage_field_key, fieldValue: toStage });\nif (lastDate) cf.push({ key: cfg.last_service_date_field_key, fieldValue: lastDate });\nreturn done('applied', needStage ? `${stage} -> ${toStage} on '${ev.event}'` : `stays ${toStage}, last service date updated on '${ev.event}'`,\n  { to_stage: toStage, write_stage: true, stage_body: { customFields: cf }, last_service_date: lastDate });\n"
+      },
+      "id": "sw-12",
+      "name": "Decide State Change",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Decide State Change').first().json.write_stage }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "sw-13",
+      "name": "If Write Stage",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3120,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ encodeURIComponent($('Normalize Event').first().json.contact_id) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Decide State Change').first().json.stage_body) }}",
+        "options": {}
+      },
+      "id": "sw-14",
+      "name": "Write Contact Fields",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "position": [
+        3360,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Decide State Change').first().json.set_dnd }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "sw-15",
+      "name": "If Set DND",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3600,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ encodeURIComponent($('Normalize Event').first().json.contact_id) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Decide State Change').first().json.dnd_body) }}",
+        "options": {}
+      },
+      "id": "sw-16",
+      "name": "Set Do Not Disturb",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "position": [
+        3840,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_CONTACT_EVENTS_TABLE_ID"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "occurred_at": "={{ $('Normalize Event').first().json.occurred_at }}",
+            "phone": "={{ $('Normalize Event').first().json.phone }}",
+            "contact_id": "={{ $('Normalize Event').first().json.contact_id }}",
+            "pillar": "={{ $('Normalize Event').first().json.detail.pillar || ($('Normalize Event').first().json.source === 'appointment_status' ? 'appointments' : 'receptionist') }}",
+            "source": "={{ $('Normalize Event').first().json.source }}",
+            "event": "={{ $('Normalize Event').first().json.event }}",
+            "event_id": "={{ $('Normalize Event').first().json.event_id }}",
+            "from_stage": "={{ $('Decide State Change').first().json.from_stage }}",
+            "to_stage": "={{ $('Decide State Change').first().json.to_stage }}",
+            "decision": "={{ $('Decide State Change').first().json.decision }}",
+            "reason": "={{ $('Decide State Change').first().json.reason }}",
+            "detail": "={{ JSON.stringify({ last_service_date: $('Decide State Change').first().json.last_service_date, wrote_fields: $('Decide State Change').first().json.write_stage, set_dnd: $('Decide State Change').first().json.set_dnd, alerted: $('Decide State Change').first().json.alert }) }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "sw-17",
+      "name": "Write Ledger Row",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        4080,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Decide State Change').first().json.alert }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "sw-18",
+      "name": "If Alert Needed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4320,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ !$('Decide State Change').first().json.retryable }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "sw-20",
+      "name": "If Safe To Mark Done",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5184,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "={{ $('Normalize Event').first().json.done_key }}",
+        "value": "true",
+        "keyType": "string",
+        "expire": true,
+        "ttl": 604800
+      },
+      "id": "sw-21",
+      "name": "Mark Event Done (Redis)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        5424,
+        -336
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "r1",
+              "name": "decision",
+              "value": "={{ $('Decide State Change').first().json.decision }}",
+              "type": "string"
+            },
+            {
+              "id": "r2",
+              "name": "reason",
+              "value": "={{ $('Decide State Change').first().json.reason }}",
+              "type": "string"
+            },
+            {
+              "id": "r3",
+              "name": "from_stage",
+              "value": "={{ $('Decide State Change').first().json.from_stage }}",
+              "type": "string"
+            },
+            {
+              "id": "r4",
+              "name": "to_stage",
+              "value": "={{ $('Decide State Change').first().json.to_stage }}",
+              "type": "string"
+            },
+            {
+              "id": "r5",
+              "name": "event",
+              "value": "={{ $('Decide State Change').first().json.event }}",
+              "type": "string"
+            },
+            {
+              "id": "r6",
+              "name": "event_id",
+              "value": "={{ $('Decide State Change').first().json.event_id }}",
+              "type": "string"
+            },
+            {
+              "id": "r7",
+              "name": "contact_id",
+              "value": "={{ $('Decide State Change').first().json.contact_id }}",
+              "type": "string"
+            },
+            {
+              "id": "r8",
+              "name": "wrote_fields",
+              "value": "={{ $('Decide State Change').first().json.write_stage }}",
+              "type": "boolean"
+            },
+            {
+              "id": "r9",
+              "name": "set_dnd",
+              "value": "={{ $('Decide State Change').first().json.set_dnd }}",
+              "type": "boolean"
+            },
+            {
+              "id": "r10",
+              "name": "alerted",
+              "value": "={{ $('Decide State Change').first().json.alert }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sw-22",
+      "name": "Return Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        5664,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d1",
+              "name": "decision",
+              "value": "duplicate_ignored",
+              "type": "string"
+            },
+            {
+              "id": "d2",
+              "name": "event_id",
+              "value": "={{ $('Normalize Event').first().json.event_id }}",
+              "type": "string"
+            },
+            {
+              "id": "d3",
+              "name": "already_done",
+              "value": "={{ $('Normalize Claim').first().json.already_done }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sw-23",
+      "name": "Return Duplicate Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1440,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "key": "={{ $('Normalize Event').first().json.lease_key }}"
+      },
+      "id": "3d356f3a-2c60-4d4f-9a22-66a97686e938",
+      "name": "Release Event Lease (Redis)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        5424,
+        96
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1",
+              "name": "execution",
+              "type": "object",
+              "value": "={{ { id: $execution.id, url: 'https://your-n8n-instance.example.com/workflow/' + $workflow.id + '/executions/' + $execution.id, lastNodeExecuted: 'Decide State Change', error: { message: $('Decide State Change').first().json.alert_text, httpCode: '' } } }}"
+            },
+            {
+              "id": "e2",
+              "name": "workflow",
+              "type": "object",
+              "value": "={{ { id: $workflow.id, name: $workflow.name } }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1dd173ae-86b6-48a9-adac-7fe691e5bedc",
+      "name": "Notify Admin Slack State Writer — Build Report",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        4592,
+        -368
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "YOUR_ERROR_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "a9e6c360-d6ab-4e18-82db-26491c573c00",
+      "name": "Notify Admin Slack State Writer",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        4880,
+        -368
+      ]
+    }
+  ],
+  "connections": {
+    "Receive State Event": {
+      "main": [
+        [
+          {
+            "node": "Normalize Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Event": {
+      "main": [
+        [
+          {
+            "node": "Check Event Done (Redis)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Event Done (Redis)": {
+      "main": [
+        [
+          {
+            "node": "Claim Event Lease (Redis)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Event Lease (Redis)": {
+      "main": [
+        [
+          {
+            "node": "Normalize Claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Claim": {
+      "main": [
+        [
+          {
+            "node": "If Event Is New",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Event Is New": {
+      "main": [
+        [
+          {
+            "node": "Get Config Rows",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Duplicate Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Config Rows": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Config": {
+      "main": [
+        [
+          {
+            "node": "Get Transition Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Transition Rows": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Transitions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Transitions": {
+      "main": [
+        [
+          {
+            "node": "Get Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Contact": {
+      "main": [
+        [
+          {
+            "node": "Get Contact Appointments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Contact Appointments": {
+      "main": [
+        [
+          {
+            "node": "Decide State Change",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide State Change": {
+      "main": [
+        [
+          {
+            "node": "If Write Stage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Write Stage": {
+      "main": [
+        [
+          {
+            "node": "Write Contact Fields",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "If Set DND",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Contact Fields": {
+      "main": [
+        [
+          {
+            "node": "If Set DND",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Set DND": {
+      "main": [
+        [
+          {
+            "node": "Set Do Not Disturb",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Write Ledger Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Do Not Disturb": {
+      "main": [
+        [
+          {
+            "node": "Write Ledger Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Ledger Row": {
+      "main": [
+        [
+          {
+            "node": "If Alert Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Alert Needed": {
+      "main": [
+        [
+          {
+            "node": "Notify Admin Slack State Writer — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "If Safe To Mark Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Safe To Mark Done": {
+      "main": [
+        [
+          {
+            "node": "Mark Event Done (Redis)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Release Event Lease (Redis)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Event Done (Redis)": {
+      "main": [
+        [
+          {
+            "node": "Return Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Release Event Lease (Redis)": {
+      "main": [
+        [
+          {
+            "node": "Return Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Admin Slack State Writer — Build Report": {
+      "main": [
+        [
+          {
+            "node": "Notify Admin Slack State Writer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Admin Slack State Writer": {
+      "main": [
+        [
+          {
+            "node": "If Safe To Mark Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "meta": {}
+}

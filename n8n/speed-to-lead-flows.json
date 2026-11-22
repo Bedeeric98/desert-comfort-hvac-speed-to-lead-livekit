@@ -1,0 +1,4978 @@
+{
+  "name": "Desert Comfort LiveKit Speed To Lead Flows",
+  "nodes": [
+    {
+      "id": "st-01",
+      "name": "Call End Speed To Lead Desert Comfort LiveKit",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "onError": "continueRegularOutput",
+      "position": [
+        -1296,
+        12704
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "YOUR_WEBHOOK_PATH",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "st-02",
+      "name": "Compute Expected Signature Speed To Lead Call End",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        -1072,
+        12704
+      ],
+      "parameters": {
+        "action": "hmac",
+        "secret": "YOUR_HVAC_SIGNING_SECRET",
+        "value": "={{ ($json.headers['x-ce-timestamp'] || '') + '.desert-comfort-livekit-agent' }}",
+        "dataPropertyName": "expectedSignature"
+      }
+    },
+    {
+      "id": "st-03",
+      "name": "If Signature Valid Speed To Lead Call End",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -848,
+        12704
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "sig-st-1",
+              "leftValue": "={{ $json.expectedSignature }}",
+              "rightValue": "={{ $json.headers['x-ce-signature'] || '' }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "sig-st-2",
+              "leftValue": "={{ Math.abs(Date.now() - Number($json.headers['x-ce-timestamp'])) <= 120000 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "st-04",
+      "name": "Determine Auth Failure Reason Speed To Lead Call End",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -624,
+        12960
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "afr-st-1",
+              "name": "signatureFailureReason",
+              "value": "={{ !$json.headers['x-ce-timestamp'] ? 'Missing x-ce-timestamp header' : !$json.headers['x-ce-signature'] ? 'Missing x-ce-signature header' : (isNaN(Number($json.headers['x-ce-timestamp'])) || Math.abs(Date.now() - Number($json.headers['x-ce-timestamp'])) > 120000) ? 'Timestamp expired or invalid (more than 120 seconds old)' : 'Signature mismatch' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "st-05",
+      "name": "Notify Admin Slack For Auth Failure Speed To Lead Call End",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "position": [
+        -400,
+        12912
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "user",
+        "user": {
+          "__rl": true,
+          "value": "YOUR_SLACK_USER_ID",
+          "mode": "list"
+        },
+        "text": "=🔒 *LiveKit — Webhook Signature Check Failed (Speed To Lead Call End)*\n\n*Reason:* {{ $json.signatureFailureReason }}\n*Endpoint:* {{ $json.webhookUrl }}\n*Caller IP:* {{ $json.headers['cf-connecting-ip'] || $json.headers['x-real-ip'] || '(unknown)' }}\n*What happened:* The caller had the correct key but the signature or timestamp did not verify. No GHL write happened.\n*Action Required:* If you were not testing, treat the signing secret as possibly leaked and rotate it.",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      }
+    },
+    {
+      "id": "st-06",
+      "name": "Respond Unauthorized Speed To Lead Call End",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -400,
+        13072
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"success\": false,\n  \"error\": \"unauthorized\",\n  \"message\": \"Request could not be verified\"\n}",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    },
+    {
+      "id": "st-10",
+      "name": "Check Speed To Lead Report Done (Redis)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "onError": "continueRegularOutput",
+      "position": [
+        -624,
+        12608
+      ],
+      "parameters": {
+        "operation": "get",
+        "propertyName": "doneValue",
+        "key": "=speedtolead-eocr:done:{{ $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.job_id }}",
+        "keyType": "string",
+        "options": {}
+      }
+    },
+    {
+      "id": "st-11",
+      "name": "Claim Speed To Lead Report Lease (Redis)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "onError": "continueRegularOutput",
+      "position": [
+        -400,
+        12608
+      ],
+      "parameters": {
+        "operation": "incr",
+        "key": "=speedtolead-eocr:lease:{{ $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.job_id }}",
+        "expire": true,
+        "ttl": 120
+      }
+    },
+    {
+      "id": "st-12",
+      "name": "Normalize Speed To Lead Report Claim",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        12608
+      ],
+      "parameters": {
+        "jsCode": "// Fail open: only drop on positive evidence of a duplicate. If Redis errored or job_id is missing, process the report anyway (a duplicate beats a lost report).\nconst jobId = $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.job_id;\nconst done = $('Check Speed To Lead Report Done (Redis)').first().json.doneValue;\nconst lease = $('Claim Speed To Lead Report Lease (Redis)').first().json;\nconst leaseVals = Object.values(lease || {}).filter((v) => typeof v === 'number');\nconst leaseCount = leaseVals.length ? leaseVals[0] : null;\nconst alreadyDone = done === 'true' || done === true;\nconst leaseTaken = leaseCount !== null && leaseCount > 1;\nconst noJobId = !jobId;\nreturn [{ json: { is_new: noJobId || !(alreadyDone || leaseTaken), already_done: alreadyDone, lease_count: leaseCount, no_job_id: noJobId } }];\n"
+      }
+    },
+    {
+      "id": "st-13",
+      "name": "If Speed To Lead Report Is New",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        48,
+        12608
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "st-new-1",
+              "leftValue": "={{ $json.is_new }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "st-14",
+      "name": "Respond Duplicate Speed To Lead Report",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        272,
+        12912
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\":\"duplicate_ignored\",\"already_done\":{{ $json.already_done }}}",
+        "options": {}
+      }
+    },
+    {
+      "id": "st-15",
+      "name": "If Lead Number Usable Speed To Lead",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        272,
+        12608
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "st-num-1",
+              "leftValue": "={{ /^\\+[1-9]\\d{7,14}$/.test(String($('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.lead_phone_number ?? '')) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "st-16",
+      "name": "Speed To Lead Write Failed — Build Report",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2208,
+        13504
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1",
+              "name": "execution",
+              "type": "object",
+              "value": "={{ { id: $execution.id, url: 'https://your-n8n-instance.example.com/workflow/' + $workflow.id + '/executions/' + $execution.id, lastNodeExecuted: $prevNode.name, error: { message: (($json.error && $json.error.message) || $json.error || 'unknown'), httpCode: (($json.error && $json.error.httpCode) || '') } } }}"
+            },
+            {
+              "id": "e2",
+              "name": "workflow",
+              "type": "object",
+              "value": "={{ { id: $workflow.id, name: $workflow.name } }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "st-17",
+      "name": "Notify Admin Slack Speed To Lead Write Failed",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "position": [
+        2432,
+        13504
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "user",
+        "user": {
+          "__rl": true,
+          "value": "YOUR_SLACK_USER_ID",
+          "mode": "list"
+        },
+        "text": "=⚠️ *Desert Comfort Speed To Lead — a write FAILED*\n\n*Lead:* {{ $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.lead_phone_number || 'unknown' }}\n*Step:* {{ $json.execution.lastNodeExecuted }}\n*Error:* {{ $json.execution.error.message }}{{ $json.execution.error.httpCode ? ' (HTTP ' + $json.execution.error.httpCode + ')' : '' }}\n*Execution:* {{ $json.execution.url }}\n*Action Required:* check this lead in GHL (status, note). The agent got its reply, so nothing resends automatically.",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      }
+    },
+    {
+      "id": "st-18",
+      "name": "Speed To Lead Number Unusable — Build Report",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        496,
+        12912
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1",
+              "name": "execution",
+              "type": "object",
+              "value": "={{ { id: $execution.id, url: 'https://your-n8n-instance.example.com/workflow/' + $workflow.id + '/executions/' + $execution.id, lastNodeExecuted: 'If Lead Number Usable Speed To Lead', error: { message: 'Speed to lead report arrived without a usable lead number (' + String($('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.lead_phone_number ?? '') + '), outcome ' + String($('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.outcome ?? '') + '. Nothing was saved. Room ' + String($('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.room ?? ''), httpCode: '' } } }}"
+            },
+            {
+              "id": "e2",
+              "name": "workflow",
+              "type": "object",
+              "value": "={{ { id: $workflow.id, name: $workflow.name } }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "st-19",
+      "name": "Respond Call End Speed To Lead",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2656,
+        13504
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\": \"ok\"}",
+        "options": {}
+      }
+    },
+    {
+      "id": "st-20",
+      "name": "Build Contact Body Speed To Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        12608
+      ],
+      "parameters": {
+        "jsCode": "// Builds both GHL bodies: PUT (contact id known) and upsert-by-phone (fallback). Never blanks an existing value; client_account is idempotent.\nconst body = $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body || {};\nconst details = body.details || {};\nconst cid = String(body.contact_id || '').trim();\nconst validId = /^[A-Za-z0-9]{10,40}$/.test(cid);\nconst fields = [{ key: 'client_account', fieldValue: 'Desert Comfort HVAC' }];\nif (details.address) fields.push({ key: 'service_address_desertcomfort', fieldValue: details.address });\nconst update = { customFields: fields };\nconst upsert = { locationId: 'YOUR_GHL_LOCATION_ID', country: 'US', phone: body.lead_phone_number, customFields: fields };\nif (details.first_name) { update.firstName = details.first_name; upsert.firstName = details.first_name; }\nif (details.last_name) { update.lastName = details.last_name; upsert.lastName = details.last_name; }\nreturn [{ json: { has_contact_id: validId, contact_id: validId ? cid : '', update_body_json: JSON.stringify(update), upsert_body_json: JSON.stringify(upsert) } }];\n"
+      }
+    },
+    {
+      "id": "st-21",
+      "name": "If Report Has Contact Id Speed To Lead",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        12608
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "st-cid-1",
+              "leftValue": "={{ $json.has_contact_id }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "st-22",
+      "name": "Update Contact Speed To Lead EOCR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        944,
+        12528
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ $json.contact_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.update_body_json }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "st-23",
+      "name": "Upsert Contact Speed To Lead EOCR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        944,
+        12704
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://services.leadconnectorhq.com/contacts/upsert",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.upsert_body_json }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "st-24",
+      "name": "Set Resolved Contact Speed To Lead",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1168,
+        12608
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "rc1",
+              "name": "contact_id",
+              "type": "string",
+              "value": "={{ $json.contact.id }}"
+            },
+            {
+              "id": "rc2",
+              "name": "first_name",
+              "type": "string",
+              "value": "={{ $json.contact.firstName ?? '' }}"
+            },
+            {
+              "id": "rc3",
+              "name": "phone",
+              "type": "string",
+              "value": "={{ $json.contact.phone ?? '' }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "st-30",
+      "name": "Build State Event Speed To Lead",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1392,
+        12608
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "se1",
+              "name": "event",
+              "type": "string",
+              "value": "={{ ['voicemail', 'silent_pickup', 'no_answer'].includes($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body?.outcome) && Number($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body?.attempt) === 3 ? 'exhausted' : ($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body?.outcome ?? '') }}"
+            },
+            {
+              "id": "se2",
+              "name": "source",
+              "type": "string",
+              "value": "end_of_call"
+            },
+            {
+              "id": "se3",
+              "name": "contact_id",
+              "type": "string",
+              "value": "={{ $('Set Resolved Contact Speed To Lead').first().json.contact_id }}"
+            },
+            {
+              "id": "se4",
+              "name": "event_id",
+              "type": "string",
+              "value": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body?.job_id || $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body?.room || '' }}"
+            },
+            {
+              "id": "se5",
+              "name": "phone",
+              "type": "string",
+              "value": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body?.lead_phone_number ?? '' }}"
+            },
+            {
+              "id": "se6",
+              "name": "occurred_at",
+              "type": "string",
+              "value": "={{ $now.toISO() }}"
+            },
+            {
+              "id": "se7",
+              "name": "detail",
+              "type": "object",
+              "value": "={{ { pillar: 'speedtolead', attempt: $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body?.attempt ?? null, emergency_unbooked: !!$('Call End Speed To Lead Desert Comfort LiveKit').first().json.body?.emergency_unbooked, flags: $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body?.flags ?? {} } }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "st-31",
+      "name": "Call State Writer Speed To Lead",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "onError": "continueErrorOutput",
+      "position": [
+        1616,
+        12608
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "YOUR_STATE_WRITER_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      }
+    },
+    {
+      "id": "st-32",
+      "name": "If Red Flags Found Speed To Lead",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1840,
+        12608
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "st-rf-1",
+              "leftValue": "={{ !!($('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.has_security_flag || $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.has_commitment_flag) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "st-33",
+      "name": "Notify Admin Slack Red Flags Speed To Lead",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "position": [
+        2064,
+        12448
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "user",
+        "user": {
+          "__rl": true,
+          "value": "YOUR_SLACK_USER_ID",
+          "mode": "list"
+        },
+        "text": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.messages?.red_flag?.slack_text ?? ('Red Flag - Speed To Lead Call\\nPhone: ' + $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.lead_phone_number + '\\nConfidence: ' + $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.confidence + '\\nSecurity flags: ' + JSON.stringify($('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.security_flags) + '\\nCommitment flags: ' + JSON.stringify($('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.commitment_flags) + '\\nRoom: ' + $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.room) }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      }
+    },
+    {
+      "id": "st-34",
+      "name": "Notify Admin Email Red Flags Speed To Lead",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "position": [
+        2288,
+        12448
+      ],
+      "parameters": {
+        "sendTo": "user@example.com",
+        "subject": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.messages?.red_flag?.email_subject ?? ('Red Flag - Speed To Lead - ' + $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.lead_phone_number) }}",
+        "emailType": "text",
+        "message": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.messages?.red_flag?.email_text ?? ('Confidence: ' + $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.confidence + '\\nSecurity flags: ' + JSON.stringify($('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.security_flags) + '\\nCommitment flags: ' + JSON.stringify($('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.commitment_flags)) }}",
+        "options": {
+          "appendAttribution": false
+        }
+      }
+    },
+    {
+      "id": "st-40",
+      "name": "Route Call Outcome Speed To Lead",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        2064,
+        12768
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "sr-1",
+                    "leftValue": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.outcome }}",
+                    "rightValue": "booked_emergency",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Booked Emergency"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "sr-2",
+                    "leftValue": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.outcome }}",
+                    "rightValue": "booked_standard",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Booked Standard"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "sr-3",
+                    "leftValue": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.outcome }}",
+                    "rightValue": "qualified_not_booked",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Qualified Not Booked"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "sr-4",
+                    "leftValue": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.outcome }}",
+                    "rightValue": "transferred",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Transferred"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "sr-5",
+                    "leftValue": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.outcome }}",
+                    "rightValue": "out_of_area",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Out Of Area"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "sr-6",
+                    "leftValue": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.outcome }}",
+                    "rightValue": "no_meaningful_conversation",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "No Meaningful Conversation"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "sr-7",
+                    "leftValue": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.outcome }}",
+                    "rightValue": "do_not_call",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Do Not Call"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "sr-8",
+                    "leftValue": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.outcome }}",
+                    "rightValue": "dead_air",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Dead Air"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "sr-9",
+                    "leftValue": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.outcome }}",
+                    "rightValue": "callback_requested",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Callback Requested"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "sr-10",
+                    "leftValue": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.outcome }}",
+                    "rightValue": "voicemail",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Voicemail"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "sr-11",
+                    "leftValue": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.outcome }}",
+                    "rightValue": "silent_pickup",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Silent Pickup"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "st-r-no_answer",
+                    "leftValue": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.outcome }}",
+                    "rightValue": "no_answer",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "No Answer"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "st-r-dial_failed",
+                    "leftValue": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').item.json.body.outcome }}",
+                    "rightValue": "dial_failed",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Dial Failed"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Unknown Outcome"
+        }
+      }
+    },
+    {
+      "id": "st-41",
+      "name": "Update GHL For Booked Emergency Speed To Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        2512,
+        12400
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ $('Set Resolved Contact Speed To Lead').first().json.contact_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"customFields\": [\n    { \"key\": \"lead_status_desertcomfort\", \"fieldValue\": \"booked_emergency\" },\n    { \"key\": \"needs_human_followup_desertcomfort\", \"fieldValue\": \"false\" }\n  ]\n}",
+        "options": {}
+      }
+    },
+    {
+      "id": "st-42",
+      "name": "Update GHL For Booked Standard Speed To Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        2512,
+        12528
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ $('Set Resolved Contact Speed To Lead').first().json.contact_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"customFields\": [\n    { \"key\": \"lead_status_desertcomfort\", \"fieldValue\": \"booked_standard\" },\n    { \"key\": \"needs_human_followup_desertcomfort\", \"fieldValue\": \"false\" }\n  ]\n}",
+        "options": {}
+      }
+    },
+    {
+      "id": "st-43",
+      "name": "Update GHL For Qualified Not Booked Speed To Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        2512,
+        12640
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ $('Set Resolved Contact Speed To Lead').first().json.contact_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"customFields\": [\n    { \"key\": \"lead_status_desertcomfort\", \"fieldValue\": \"qualified_not_booked\" },\n    { \"key\": \"needs_human_followup_desertcomfort\", \"fieldValue\": \"true\" }\n  ]\n}",
+        "options": {}
+      }
+    },
+    {
+      "id": "st-44",
+      "name": "Update GHL For Transferred Speed To Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        2512,
+        12768
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ $('Set Resolved Contact Speed To Lead').first().json.contact_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"customFields\": [\n    { \"key\": \"lead_status_desertcomfort\", \"fieldValue\": \"transferred\" },\n    { \"key\": \"needs_human_followup_desertcomfort\", \"fieldValue\": \"true\" }\n  ]\n}",
+        "options": {}
+      }
+    },
+    {
+      "id": "st-45",
+      "name": "Update GHL For Out Of Area Speed To Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        2512,
+        12880
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ $('Set Resolved Contact Speed To Lead').first().json.contact_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"customFields\": [\n    { \"key\": \"lead_status_desertcomfort\", \"fieldValue\": \"out_of_area\" }\n  ]\n}",
+        "options": {}
+      }
+    },
+    {
+      "id": "st-46",
+      "name": "Update GHL For No Meaningful Conversation Speed To Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        2512,
+        13008
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ $('Set Resolved Contact Speed To Lead').first().json.contact_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"customFields\": [\n    { \"key\": \"lead_status_desertcomfort\", \"fieldValue\": \"no_meaningful_conversation\" }\n  ]\n}",
+        "options": {}
+      }
+    },
+    {
+      "id": "st-47",
+      "name": "Update GHL For Do Not Call Speed To Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        2512,
+        13120
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ $('Set Resolved Contact Speed To Lead').first().json.contact_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"customFields\": [\n    { \"key\": \"lead_status_desertcomfort\", \"fieldValue\": \"do_not_call\" }\n  ]\n}",
+        "options": {}
+      }
+    },
+    {
+      "id": "st-48",
+      "name": "Update GHL For Dead Air Speed To Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        2512,
+        13248
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ $('Set Resolved Contact Speed To Lead').first().json.contact_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ customFields: ($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.checkup?.crash_detected ? [] : [{ key: 'lead_status_desertcomfort', fieldValue: 'dead_air' }]) }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "st-49",
+      "name": "Update GHL For Callback Requested Speed To Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        2512,
+        13360
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ $('Set Resolved Contact Speed To Lead').first().json.contact_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"customFields\": [\n    { \"key\": \"lead_status_desertcomfort\", \"fieldValue\": \"callback_requested\" },\n    { \"key\": \"needs_human_followup_desertcomfort\", \"fieldValue\": \"true\" }\n  ]\n}",
+        "options": {}
+      }
+    },
+    {
+      "id": "st-50",
+      "name": "Build Note And Messages Speed To Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2768,
+        12832
+      ],
+      "parameters": {
+        "jsCode": "// Builds the GHL note and the Slack/email texts once, for every outcome. The agent already wrote the finished report texts; this only falls back when they are missing (a crash alert, an old agent).\nconst b = $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body || {};\nconst m = b.messages || {};\nconst out = String(b.outcome || '');\nconst crash = !!(b.checkup && b.checkup.crash_detected);\nconst unreached = ['voicemail', 'silent_pickup', 'no_answer'].includes(out);\nconst failedDial = out === 'dial_failed';\nconst LABEL = { booked_emergency: 'emergency appointment booked', booked_standard: 'standard appointment booked', qualified_not_booked: 'qualified, not booked', transferred: 'transferred to a human', out_of_area: 'outside the service area', no_meaningful_conversation: 'connected, no meaningful conversation', do_not_call: 'asked not to be contacted again', dead_air: 'connected but nobody spoke (dead air)', callback_requested: 'asked for a callback (a team member calls)', voicemail: 'went to voicemail', silent_pickup: 'picked up but nobody spoke', no_answer: 'no answer (the phone rang out)', dial_failed: 'the call could NOT be placed' };\nconst headline = crash ? 'the model failed mid-call (a diagnostic alert, not the final outcome)' : (LABEL[out] || out);\nconst lines = [`Speed to lead call, attempt ${b.attempt ?? '?'}: ${headline}.`];\nif (b.outcome_reason) lines.push('Reason: ' + b.outcome_reason);\nif (b.sip_status_code) lines.push('SIP code: ' + b.sip_status_code);\nif (unreached && Number(b.attempt) === 3) lines.push('All 3 attempts used with no contact (calls plus a text). Marked exhausted; a team member needs to follow up.');\nif (failedDial) lines.push('Nothing retries automatically. Check the number in GHL and the phone line.');\nif (b.emergency_unbooked) lines.push('EMERGENCY CRITERIA MET - NOT BOOKED.');\nif (b.flags && b.flags.consent_dispute) lines.push('POSSIBLE DATA MIX-UP: the lead says they never filled out a form.');\nconst duration = (b.call_duration_secs === null || b.call_duration_secs === undefined) ? 'unknown' : b.call_duration_secs + 's';\nlines.push('', DateTime.now().setZone('America/Phoenix').toFormat('cccc d LLLL yyyy, h:mm a') + ' Phoenix time', 'Phone: ' + (b.lead_phone_number || ''), 'Duration: ' + duration, 'Room: ' + (b.room || ''), 'Recording: ' + (b.recording_consent || 'unknown'));\nif (b.call_summary) lines.push('', 'Summary: ' + b.call_summary);\nif (b.transcript_allowed && b.transcript_text) lines.push('', 'Transcript:', b.transcript_text);\nelse if (!unreached && !failedDial && !crash) lines.push('', '(No transcript kept: the lead did not agree to recording, so only this summary is saved.)');\nconst fallbackText = failedDial\n  ? `⚠️ Speed To Lead - Call ${b.attempt ?? '?'} could NOT be placed\\nPhone: ${b.lead_phone_number || ''}\\nReason: ${b.outcome_reason || 'unknown'}${b.sip_status_code ? '\\nSIP code: ' + b.sip_status_code : ''}\\nNothing retries automatically. Check the number in GHL and the phone line.`\n  : `Speed To Lead call - ${headline}\\nPhone: ${b.lead_phone_number || ''}\\nAttempt: ${b.attempt ?? '?'}\\n(formatted message unavailable)`;\nconst rep = m.report || m.alert || {};\nconst attempt = Number(b.attempt);\nreturn [{ json: {\n  note_text: lines.join('\\n'),\n  send_messages: !unreached,\n  slack_text: rep.slack_text || fallbackText,\n  email_subject: rep.email_subject || ('Speed To Lead - ' + headline + ' - ' + (b.lead_phone_number || '')),\n  email_text: rep.email_text || fallbackText,\n  next_attempt: unreached && !crash && [1, 2, 3].includes(attempt),\n  finished: 'call' + (attempt || ''),\n} }];\n"
+      }
+    },
+    {
+      "id": "st-51",
+      "name": "Create Note GHL Speed To Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        2992,
+        12832
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ $('Set Resolved Contact Speed To Lead').first().json.contact_id }}/notes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-04-15"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "body",
+              "value": "={{ $('Build Note And Messages Speed To Lead').first().json.note_text }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "st-52",
+      "name": "If Report Message Wanted Speed To Lead",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3216,
+        12832
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "st-mw-1",
+              "leftValue": "={{ $('Build Note And Messages Speed To Lead').first().json.send_messages }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "st-53",
+      "name": "Notify Admin Slack For Speed To Lead Call",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        3440,
+        12752
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "user",
+        "user": {
+          "__rl": true,
+          "value": "YOUR_SLACK_USER_ID",
+          "mode": "list"
+        },
+        "text": "={{ $('Build Note And Messages Speed To Lead').first().json.slack_text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      }
+    },
+    {
+      "id": "st-54",
+      "name": "Notify Admin Email For Speed To Lead Call",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        3664,
+        12752
+      ],
+      "parameters": {
+        "sendTo": "user@example.com",
+        "subject": "={{ $('Build Note And Messages Speed To Lead').first().json.email_subject }}",
+        "emailType": "text",
+        "message": "={{ $('Build Note And Messages Speed To Lead').first().json.email_text }}",
+        "options": {
+          "appendAttribution": false
+        }
+      }
+    },
+    {
+      "id": "st-55",
+      "name": "If Next Attempt Wanted Speed To Lead",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3888,
+        12832
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "st-na-1",
+              "leftValue": "={{ $('Build Note And Messages Speed To Lead').isExecuted ? $('Build Note And Messages Speed To Lead').first().json.next_attempt === true : false }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "st-58",
+      "name": "Mark Speed To Lead Report Done (Redis)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "onError": "continueRegularOutput",
+      "position": [
+        2880,
+        13504
+      ],
+      "parameters": {
+        "operation": "set",
+        "key": "=speedtolead-eocr:done:{{ $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.job_id }}",
+        "value": "true",
+        "keyType": "string",
+        "expire": true,
+        "ttl": 604800
+      }
+    },
+    {
+      "id": "st-59",
+      "name": "Clear Active Call Lock Speed To Lead (Redis)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "onError": "continueRegularOutput",
+      "position": [
+        3104,
+        13504
+      ],
+      "parameters": {
+        "operation": "delete",
+        "key": "=activecall:{{ $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.lead_phone_number }}"
+      }
+    },
+    {
+      "id": "st-60",
+      "name": "Speed To Lead State Writer Failed — Build Report",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1616,
+        12368
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1",
+              "name": "execution",
+              "type": "object",
+              "value": "={{ { id: $execution.id, url: 'https://your-n8n-instance.example.com/workflow/' + $workflow.id + '/executions/' + $execution.id, lastNodeExecuted: $prevNode.name, error: { message: (($json.error && $json.error.message) || $json.error || 'unknown'), httpCode: (($json.error && $json.error.httpCode) || '') } } }}"
+            },
+            {
+              "id": "e2",
+              "name": "workflow",
+              "type": "object",
+              "value": "={{ { id: $workflow.id, name: $workflow.name } }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "st-61",
+      "name": "Notify Admin Slack Speed To Lead State Writer Failed",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "position": [
+        1840,
+        12368
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "user",
+        "user": {
+          "__rl": true,
+          "value": "YOUR_SLACK_USER_ID",
+          "mode": "list"
+        },
+        "text": "=⚠️ *Desert Comfort Speed To Lead — State Writer FAILED*\n\n*Lead:* {{ $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.lead_phone_number || 'unknown' }}\n*Step:* {{ $json.execution.lastNodeExecuted }}\n*Error:* {{ $json.execution.error.message }}{{ $json.execution.error.httpCode ? ' (HTTP ' + $json.execution.error.httpCode + ')' : '' }}\n*Execution:* {{ $json.execution.url }}\n*Action Required:* the lead's stage may be out of date. The call outcome itself still ran.",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      }
+    },
+    {
+      "id": "st-62",
+      "name": "Speed To Lead Unknown Outcome — Build Report",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2512,
+        13488
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1",
+              "name": "execution",
+              "type": "object",
+              "value": "={{ { id: $execution.id, url: 'https://your-n8n-instance.example.com/workflow/' + $workflow.id + '/executions/' + $execution.id, lastNodeExecuted: 'Route Call Outcome Speed To Lead', error: { message: 'Speed to lead report with an outcome this chain does not know: ' + String($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.outcome ?? '') + '. Nothing was written to the lead except the State Writer event. Room ' + String($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.room ?? ''), httpCode: '' } } }}"
+            },
+            {
+              "id": "e2",
+              "name": "workflow",
+              "type": "object",
+              "value": "={{ { id: $workflow.id, name: $workflow.name } }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "st-70",
+      "name": "If Call Check-Up Has Flags Speed To Lead",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "onError": "continueRegularOutput",
+      "position": [
+        272,
+        13200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "st-cu-1",
+              "leftValue": "={{ (Array.isArray($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body?.checkup?.flags) && $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.checkup.flags.length > 0) || !!$('Call End Speed To Lead Desert Comfort LiveKit').first().json.body?.checkup?.error }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "st-71",
+      "name": "Log Call Check-Up Speed To Lead",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "onError": "continueRegularOutput",
+      "position": [
+        496,
+        13200
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_CALL_CHECKUPS_TABLE_ID"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "occurred_at": "={{ $now.toISO() }}",
+            "job_id": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.job_id ?? '' }}",
+            "room": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.room ?? '' }}",
+            "phone_last4": "={{ String($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.lead_phone_number ?? '').slice(-4) }}",
+            "outcome": "={{ 'speedtolead:' + ($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.outcome ?? '') }}",
+            "severity": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.checkup.has_red === true ? 'RED' : ($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.checkup.error ? 'ERROR' : 'YELLOW') }}",
+            "red_rules": "={{ ($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.checkup.red_rules || []).join(',') }}",
+            "yellow_rules": "={{ ($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.checkup.yellow_rules || []).join(',') }}",
+            "quote_tier": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.checkup.quote_tier || '' }}",
+            "caller_temperature": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.checkup.caller_temperature ?? '' }}",
+            "flags_json": "={{ JSON.stringify($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.checkup.error ? [{ rule: 'CHECKUP_ERROR', severity: 'ERROR', evidence: $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.checkup.error }] : ($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.checkup.flags || [])).slice(0, 4000) }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "st-72",
+      "name": "If Call Check-Up Has Red Flags Speed To Lead",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "onError": "continueRegularOutput",
+      "position": [
+        720,
+        13200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "st-cu-2",
+              "leftValue": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body?.checkup?.has_red === true || !!$('Call End Speed To Lead Desert Comfort LiveKit').first().json.body?.checkup?.error }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "st-73",
+      "name": "Notify Admin Slack Call Check-Up Speed To Lead",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "position": [
+        944,
+        13200
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "user",
+        "user": {
+          "__rl": true,
+          "value": "YOUR_SLACK_USER_ID",
+          "mode": "list"
+        },
+        "text": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.messages?.alert?.slack_text ?? ('Speed To Lead Call Check-Up needs a look\\nPhone: ' + $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.lead_phone_number + '\\nRules: ' + (($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.checkup?.red_rules || []).join(', ') || $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.checkup?.error || 'unknown')) }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      }
+    },
+    {
+      "id": "st-74",
+      "name": "Notify Admin Email Call Check-Up Speed To Lead",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "position": [
+        1168,
+        13200
+      ],
+      "parameters": {
+        "sendTo": "user@example.com",
+        "subject": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.messages?.alert?.email_subject ?? ('Speed To Lead Call Check-Up - ' + (($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.checkup?.red_rules || []).join(', ') || 'check-up failed')) }}",
+        "emailType": "text",
+        "message": "={{ $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.messages?.alert?.email_text ?? ('The call check-up found something that needs a human look.\\nPhone: ' + $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.lead_phone_number + '\\nRules: ' + (($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.checkup?.red_rules || []).join(', ') || $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.checkup?.error || 'unknown')) }}",
+        "options": {
+          "appendAttribution": false
+        }
+      }
+    },
+    {
+      "id": "stx-update-ghl-for-no-answer-speed-to-lead",
+      "name": "Update GHL For No Answer Speed To Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        2512,
+        13616
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ $('Set Resolved Contact Speed To Lead').first().json.contact_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ customFields: [ { key: 'lead_status_desertcomfort', fieldValue: ({ 1: 'no_answer_call_1', 2: 'no_answer_call_2', 3: 'exhausted' })[Number($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.attempt)] || 'no_answer_call_1' } ] }, null, 2) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "stx-route-next-step-by-attempt-speed-to-lead",
+      "name": "Route Next Step By Attempt Speed To Lead",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        4112,
+        12832
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "x0",
+                    "leftValue": "={{ String($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.attempt) }}",
+                    "rightValue": "1",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Call 1"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "x1",
+                    "leftValue": "={{ String($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.attempt) }}",
+                    "rightValue": "2",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Call 2"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "x2",
+                    "leftValue": "={{ String($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.attempt) }}",
+                    "rightValue": "3",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Call 3"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Unknown Attempt"
+        }
+      }
+    },
+    {
+      "id": "stx-notify-admin-slack-speed-to-lead-problem",
+      "name": "Notify Admin Slack Speed To Lead Problem",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "position": [
+        5904,
+        13360
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "user",
+        "user": {
+          "__rl": true,
+          "value": "YOUR_SLACK_USER_ID",
+          "mode": "list"
+        },
+        "text": "=⚠️ *Desert Comfort Speed To Lead — next step NOT done*\n\n*Lead:* {{ $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.lead_phone_number || 'unknown' }} ({{ $('Set Resolved Contact Speed To Lead').first().json.contact_id }}), after attempt {{ $('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.attempt ?? '?' }}\n*Step:* {{ $prevNode.name }}\n*What happened:* {{ $json.alert_text || ($json.error && ($json.error.message || $json.error)) || 'unexpected attempt number, or no details' }}\n*Execution:* https://your-n8n-instance.example.com/workflow/{{ $workflow.id }}/executions/{{ $execution.id }}\n*Action Required:* check this lead in GHL and follow up yourself if needed. Nothing retries automatically.",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      }
+    },
+    {
+      "id": "stx-get-settings-for-call-2",
+      "name": "Get Settings For Call 2",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        4336,
+        12560
+      ],
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_CONFIG_TABLE_ID"
+        },
+        "returnAll": true
+      }
+    },
+    {
+      "id": "stx-wait-before-call-2",
+      "name": "Wait Before Call 2",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "executeOnce": true,
+      "position": [
+        4560,
+        12560
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": "={{ Number((($('Get Settings For Call 2').all().map((i) => i.json).find((r) => r.key === 'speedtolead_call2_wait_seconds')) || {}).value) || 300 }}",
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "stx-get-contact-for-call-2",
+      "name": "Get Contact For Call 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput",
+      "position": [
+        4784,
+        12560
+      ],
+      "parameters": {
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ encodeURIComponent($('Set Resolved Contact Speed To Lead').first().json.contact_id) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "stx-check-active-call-lock-for-call-2",
+      "name": "Check Active Call Lock For Call 2",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        5008,
+        12560
+      ],
+      "parameters": {
+        "operation": "get",
+        "propertyName": "lockValue",
+        "key": "=activecall:{{ (($('Get Contact For Call 2').first().json.body || {}).contact || {}).phone || '' }}",
+        "keyType": "string",
+        "options": {}
+      }
+    },
+    {
+      "id": "stx-decide-call-2-allowed",
+      "name": "Decide Call 2 Allowed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5232,
+        12560
+      ],
+      "parameters": {
+        "jsCode": "// Decide Call 2 Allowed - this workflow's own copy of Call 1's checks (Decide Call 1 Allowed), for Call 2. Writes nothing.\n// Extra rule (SunPath): only call if the status is still no_answer_call_1, so a lead reached or booked during the wait is not called.\n// Fail-closed: anything that can't be checked denies. alert = a person must look. Quiet hours: Call 2 is exempt (Admin's rule).\nconst cid = $('Set Resolved Contact Speed To Lead').first().json.contact_id;\nconst base = { contact_id: cid, phone: '', first_name: '', last_name: '', stage: '', room: '', allowed: false, alert: false, alert_text: '', decision: '', reason: '' };\nconst out = (decision, reason, extra = {}) => [{ json: { ...base, decision, reason, ...extra } }];\nconst denyAlert = (decision, reason) => out(decision, reason, { alert: true, alert_text: `Call 2 was NOT placed: ${reason}.` });\n\nconst cr = $('Get Contact For Call 2').first().json;\nif (cr.statusCode !== 200 || !cr.body || !cr.body.contact) return denyAlert('fetch_failed', `could not read contact ${cid} from GHL (HTTP ${cr.statusCode})`);\nconst c = cr.body.contact;\nbase.phone = String(c.phone || '').trim();\nbase.first_name = String(c.firstName || '').trim();\nbase.last_name = String(c.lastName || '').trim();\n\nconst dnd = (c.dndSettings && c.dndSettings.Call) || {};\nif (String(dnd.status || '').toLowerCase() === 'active') return out('denied_dnd', 'Call DND is active on this contact');\n\nconst cfg = {}; try { for (const it of $('Get Settings For Call 2').all()) { const r = it.json || {}; if (r.key) cfg[String(r.key).trim()] = r.value; } } catch (e) { /* unreadable: defaults below apply */ }\nconst field = (id) => { const f = (c.customFields || []).find((x) => x.id === id); return f ? String(f.value !== undefined ? f.value : (f.fieldValue ?? '')).trim().toLowerCase() : ''; };\nlet stage = field(cfg.stage_field_id || 'YOUR_GHL_FIELD_ID_STAGE');\nif (!stage) { const legacy = field(cfg.lead_status_field_id || 'YOUR_GHL_FIELD_ID_LEAD_STATUS'); const booked = String(cfg.legacy_booked_statuses || 'booked_emergency,booked_standard').split(',').map((s) => s.trim()); stage = booked.includes(legacy) ? 'booked' : 'contact'; }\nconst eligible = String(cfg.speedtolead_eligible_stages || 'contact,lead').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);\nconst tag = String(cfg.human_contacted_tag || 'human-contacted').trim().toLowerCase();\nconst hasTag = (c.tags || []).map((t) => String(t).trim().toLowerCase()).includes(tag);\nbase.stage = stage;\nconst status = field(cfg.lead_status_field_id || 'YOUR_GHL_FIELD_ID_LEAD_STATUS');\nif (status !== 'no_answer_call_1') return out('denied_status_changed', `status is now \"${status || 'blank'}\", not no_answer_call_1: the lead was reached or updated during the wait`);\nif (!eligible.includes(stage)) return out('denied_stage', `stage \"${stage}\" is not eligible for speed-to-lead (${eligible.join('/')})`);\nif (hasTag) return out('denied_human_reached', `contact carries the \"${tag}\" tag: a team member already reached this lead`);\n\nif (!base.phone) return denyAlert('denied_no_phone', 'the contact has no phone number');\nif (!/^\\+1\\d{10}$/.test(base.phone)) return denyAlert('denied_bad_phone', `the contact's phone \"${base.phone.slice(0, 30)}\" is not a US number in +1XXXXXXXXXX form`);\n\nconst lockItem = $('Check Active Call Lock For Call 2').first().json;\nif (!lockItem || lockItem.error) return denyAlert('lock_check_failed', `could not read the active-call lock (${lockItem && lockItem.error ? String(lockItem.error.message || lockItem.error).slice(0, 200) : 'no result'})`);\nif (lockItem.lockValue !== undefined && lockItem.lockValue !== null && String(lockItem.lockValue) !== '') return out('denied_active_call', 'this number is on a call or already being called');\n\nconst room = `out-_${base.phone.replace(/\\D/g, '')}_${cid}-2-${Date.now()}`;\nreturn out('allowed', `Call 2 allowed (stage ${stage})`, { allowed: true, room });\n"
+      }
+    },
+    {
+      "id": "stx-log-call-2-gate-decision",
+      "name": "Log Call 2 Gate Decision",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "onError": "continueRegularOutput",
+      "position": [
+        5456,
+        12560
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_CONTACT_EVENTS_TABLE_ID"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "occurred_at": "={{ $now.toISO() }}",
+            "phone": "={{ $('Decide Call 2 Allowed').first().json.phone || '' }}",
+            "contact_id": "={{ $('Set Resolved Contact Speed To Lead').first().json.contact_id }}",
+            "pillar": "speedtolead",
+            "source": "speedtolead_call2",
+            "event": "gate_check_call",
+            "event_id": "={{ 'speedtolead_call2:' + $('Set Resolved Contact Speed To Lead').first().json.contact_id + ':' + Date.now() }}",
+            "from_stage": "",
+            "to_stage": "",
+            "decision": "={{ $('Decide Call 2 Allowed').first().json.decision }}",
+            "reason": "={{ $('Decide Call 2 Allowed').first().json.reason }}",
+            "detail": "={{ JSON.stringify($('Decide Call 2 Allowed').first().json) }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "stx-route-call-2-gate-decision",
+      "name": "Route Call 2 Gate Decision",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        5680,
+        12560
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "x0",
+                    "leftValue": "={{ $('Decide Call 2 Allowed').first().json.allowed }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Allowed"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "x1",
+                    "leftValue": "={{ $('Decide Call 2 Allowed').first().json.alert }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Needs A Person"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "stx-sign-livekit-request-for-call-2",
+      "name": "Sign LiveKit Request For Call 2",
+      "type": "n8n-nodes-base.jwt",
+      "typeVersion": 1,
+      "onError": "continueErrorOutput",
+      "position": [
+        5904,
+        12480
+      ],
+      "parameters": {
+        "useJson": true,
+        "claimsJson": "={{ JSON.stringify({ iss: 'YOUR_LIVEKIT_API_KEY', sub: 'n8n-speedtolead', nbf: Math.floor(Date.now() / 1000) - 10, exp: Math.floor(Date.now() / 1000) + 600, video: { room: $('Decide Call 2 Allowed').first().json.room, roomAdmin: true, roomCreate: true } }) }}",
+        "options": {
+          "algorithm": "HS256"
+        }
+      }
+    },
+    {
+      "id": "stx-fire-call-2-on-livekit",
+      "name": "Fire Call 2 On LiveKit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "onError": "continueErrorOutput",
+      "position": [
+        6128,
+        12480
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-livekit-server.example.com/twirp/livekit.AgentDispatchService/CreateDispatch",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "REDACTED"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ agent_name: 'desert-comfort-outbound', room: $('Decide Call 2 Allowed').first().json.room, metadata: JSON.stringify({ phone: $('Decide Call 2 Allowed').first().json.phone, first_name: $('Decide Call 2 Allowed').first().json.first_name, last_name: $('Decide Call 2 Allowed').first().json.last_name, contact_id: $('Decide Call 2 Allowed').first().json.contact_id, attempt: 2, texted: false }) }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "stx-get-contact-for-text",
+      "name": "Get Contact For Text",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput",
+      "position": [
+        4336,
+        12832
+      ],
+      "parameters": {
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ encodeURIComponent($('Set Resolved Contact Speed To Lead').first().json.contact_id) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "stx-get-settings-for-text",
+      "name": "Get Settings For Text",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        4560,
+        12832
+      ],
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_CONFIG_TABLE_ID"
+        },
+        "returnAll": true
+      }
+    },
+    {
+      "id": "stx-decide-text-allowed",
+      "name": "Decide Text Allowed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4784,
+        12832
+      ],
+      "parameters": {
+        "jsCode": "// Decide Text Allowed - the text after an unanswered Call 2, and whether to arm Call 3 (the GHL 12 h tag). Writes nothing.\n// Same rules as the old Next Attempt workflow: no text if SMS is blocked or texts are switched off, but Call 3 is still armed;\n// nothing at all if the lead is resolved (booked / a person reached them). Sent right away (Admin's rule). Unreadable contact = alert.\nconst cid = $('Set Resolved Contact Speed To Lead').first().json.contact_id;\nconst cfg = {}; try { for (const it of $('Get Settings For Text').all()) { const r = it.json || {}; if (r.key) cfg[String(r.key).trim()] = r.value; } } catch (e) { /* unreadable: defaults below apply */ }\nconst cr = $('Get Contact For Text').first().json;\nif (cr.statusCode !== 200 || !cr.body || !cr.body.contact) return [{ json: { action: 'alert', contact_id: cid, phone: '', decision: 'fetch_failed', reason: `could not read contact from GHL (HTTP ${cr.statusCode})`, alert_text: `The text after Call 2 was NOT sent and Call 3 was NOT armed: could not read contact ${cid} from GHL (HTTP ${cr.statusCode}).` } }];\nconst c = cr.body.contact;\nconst phone = String(c.phone || '').trim();\nconst field = (id) => { const f = (c.customFields || []).find((x) => x.id === id); return f ? String(f.value !== undefined ? f.value : (f.fieldValue ?? '')).trim().toLowerCase() : ''; };\nlet stage = field(cfg.stage_field_id || 'YOUR_GHL_FIELD_ID_STAGE');\nif (!stage) { const legacy = field(cfg.lead_status_field_id || 'YOUR_GHL_FIELD_ID_LEAD_STATUS'); const booked = String(cfg.legacy_booked_statuses || 'booked_emergency,booked_standard').split(',').map((s) => s.trim()); stage = booked.includes(legacy) ? 'booked' : 'contact'; }\nconst eligible = String(cfg.speedtolead_eligible_stages || 'contact,lead').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);\nconst tag = String(cfg.human_contacted_tag || 'human-contacted').trim().toLowerCase();\nconst hasTag = (c.tags || []).map((t) => String(t).trim().toLowerCase()).includes(tag);\nconst res = (action, decision, reason) => [{ json: { action, contact_id: cid, phone, stage, decision, reason, alert_text: '' } }];\nif (!eligible.includes(stage)) return res('none', 'denied_stage', `stage \"${stage}\" is not eligible: no text, no Call 3`);\nif (hasTag) return res('none', 'denied_human_reached', `the \"${tag}\" tag is on: a team member already reached this lead`);\nif (String(cfg.speedtolead_text_enabled ?? 'true').trim().toLowerCase() === 'false') return res('tag_only', 'text_disabled', 'texts are switched off in config (speedtolead_text_enabled); Call 3 armed');\nconst sms = (c.dndSettings && c.dndSettings.SMS) || {};\nif (c.dnd === true || String(sms.status || '').toLowerCase() === 'active') return res('tag_only', 'denied_dnd_sms', 'SMS DND is active: no text; Call 3 armed');\nif (!/^\\+1\\d{10}$/.test(phone)) return res('tag_only', 'denied_bad_phone', `no usable US number (\"${phone.slice(0, 30)}\"): no text; Call 3 armed`);\nreturn res('send', 'allowed', 'text after Call 2 allowed');\n"
+      }
+    },
+    {
+      "id": "stx-log-text-decision",
+      "name": "Log Text Decision",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "onError": "continueRegularOutput",
+      "position": [
+        5008,
+        12832
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_CONTACT_EVENTS_TABLE_ID"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "occurred_at": "={{ $now.toISO() }}",
+            "phone": "={{ $('Decide Text Allowed').first().json.phone || '' }}",
+            "contact_id": "={{ $('Set Resolved Contact Speed To Lead').first().json.contact_id }}",
+            "pillar": "speedtolead",
+            "source": "speedtolead_text",
+            "event": "gate_check_text",
+            "event_id": "={{ 'speedtolead_text:' + $('Set Resolved Contact Speed To Lead').first().json.contact_id + ':' + Date.now() }}",
+            "from_stage": "",
+            "to_stage": "",
+            "decision": "={{ $('Decide Text Allowed').first().json.decision }}",
+            "reason": "={{ $('Decide Text Allowed').first().json.reason }}",
+            "detail": "={{ JSON.stringify($('Decide Text Allowed').first().json) }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "stx-route-text-decision",
+      "name": "Route Text Decision",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        5232,
+        12832
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "x0",
+                    "leftValue": "={{ $('Decide Text Allowed').first().json.action }}",
+                    "rightValue": "send",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Send Text"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "x1",
+                    "leftValue": "={{ $('Decide Text Allowed').first().json.action }}",
+                    "rightValue": "tag_only",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Arm Call 3 Only"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "x2",
+                    "leftValue": "={{ $('Decide Text Allowed').first().json.action }}",
+                    "rightValue": "alert",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Needs A Person"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "stx-build-text-message",
+      "name": "Build Text Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5456,
+        12784
+      ],
+      "parameters": {
+        "jsCode": "// Build Text Message - the wording lives in config (speedtolead_text_body); {first_name} becomes 'there' without a real name.\nconst c = ($('Get Contact For Text').first().json.body || {}).contact || {};\nconst cfg = {}; try { for (const it of $('Get Settings For Text').all()) { const r = it.json || {}; if (r.key) cfg[String(r.key).trim()] = r.value; } } catch (e) { /* unreadable: defaults below apply */ }\nconst first = String(c.firstName || '').trim();\nconst real = first && !/^(not captured|unknown|n\\/a|none)$/i.test(first);\nconst tpl = String(cfg.speedtolead_text_body || 'Hi {first_name}, this is Desert Comfort HVAC. We tried to reach you about your service request. You can call or text this number anytime. Reply STOP to opt out.');\nreturn [{ json: { from: String(cfg.speedtolead_sms_from || 'YOUR_BUSINESS_PHONE_NUMBER'), to: String(c.phone || ''), text: tpl.split('{first_name}').join(real ? first : 'there') } }];\n"
+      }
+    },
+    {
+      "id": "stx-send-text-speed-to-lead",
+      "name": "Send Text Speed To Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        5680,
+        12784
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telnyx.com/v2/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ from: $json.from, to: $json.to, text: $json.text }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "stx-add-call-3-tag",
+      "name": "Add Call 3 Tag",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput",
+      "position": [
+        5904,
+        12880
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ encodeURIComponent($('Set Resolved Contact Speed To Lead').first().json.contact_id) }}/tags",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tags: [String((($('Get Settings For Text').all().map((i) => i.json).find((r) => r.key === 'speedtolead_call3_tag')) || {}).value || 'speedtolead-call3').trim()] }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "stx-get-contact-for-exhausted",
+      "name": "Get Contact For Exhausted",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput",
+      "position": [
+        4336,
+        13104
+      ],
+      "parameters": {
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ encodeURIComponent($('Set Resolved Contact Speed To Lead').first().json.contact_id) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "stx-get-settings-for-exhausted",
+      "name": "Get Settings For Exhausted",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        4560,
+        13104
+      ],
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_CONFIG_TABLE_ID"
+        },
+        "returnAll": true
+      }
+    },
+    {
+      "id": "stx-decide-exhausted",
+      "name": "Decide Exhausted",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4784,
+        13104
+      ],
+      "parameters": {
+        "jsCode": "// Decide Exhausted - flag the lead for a person only if they are still an open speed-to-lead lead (same stage + human-tag rules as Call 1).\n// If GHL can't be read, flag anyway: a person checking is harmless, a missed lead is not. The exhausted status was already written by the outcome branch.\nconst cid = $('Set Resolved Contact Speed To Lead').first().json.contact_id;\nconst phone = String($('Call End Speed To Lead Desert Comfort LiveKit').first().json.body.lead_phone_number || '');\nconst cr = $('Get Contact For Exhausted').first().json;\nif (cr.statusCode !== 200 || !cr.body || !cr.body.contact) return [{ json: { applies: true, stage: 'unknown', name: 'the lead', phone, reason: `could not re-read the contact from GHL (HTTP ${cr.statusCode}); flagged anyway` } }];\nconst c = cr.body.contact;\nconst cfg = {}; try { for (const it of $('Get Settings For Exhausted').all()) { const r = it.json || {}; if (r.key) cfg[String(r.key).trim()] = r.value; } } catch (e) { /* unreadable: defaults below apply */ }\nconst field = (id) => { const f = (c.customFields || []).find((x) => x.id === id); return f ? String(f.value !== undefined ? f.value : (f.fieldValue ?? '')).trim().toLowerCase() : ''; };\nlet stage = field(cfg.stage_field_id || 'YOUR_GHL_FIELD_ID_STAGE');\nif (!stage) { const legacy = field(cfg.lead_status_field_id || 'YOUR_GHL_FIELD_ID_LEAD_STATUS'); const booked = String(cfg.legacy_booked_statuses || 'booked_emergency,booked_standard').split(',').map((s) => s.trim()); stage = booked.includes(legacy) ? 'booked' : 'contact'; }\nconst eligible = String(cfg.speedtolead_eligible_stages || 'contact,lead').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);\nconst tag = String(cfg.human_contacted_tag || 'human-contacted').trim().toLowerCase();\nconst hasTag = (c.tags || []).map((t) => String(t).trim().toLowerCase()).includes(tag);\nconst applies = eligible.includes(stage) && !hasTag;\nconst name = [c.firstName, c.lastName].filter(Boolean).join(' ').trim() || 'the lead';\nreturn [{ json: { applies, stage, name, phone: c.phone || phone, reason: applies ? 'still an open lead after Call 3' : (hasTag ? 'a team member already reached this lead' : `stage is now \"${stage}\"`) } }];\n"
+      }
+    },
+    {
+      "id": "stx-if-exhausted-applies",
+      "name": "If Exhausted Applies",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5008,
+        13104
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "ea",
+              "leftValue": "={{ $json.applies }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "stx-set-needs-human-follow-up",
+      "name": "Set Needs Human Follow-Up",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        5232,
+        13104
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ encodeURIComponent($('Set Resolved Contact Speed To Lead').first().json.contact_id) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"customFields\": [\n    { \"key\": \"needs_human_followup_desertcomfort\", \"fieldValue\": \"true\" }\n  ]\n}",
+        "options": {}
+      }
+    },
+    {
+      "id": "stx-notify-admin-slack-exhausted",
+      "name": "Notify Admin Slack Exhausted",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        5456,
+        13104
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "user",
+        "user": {
+          "__rl": true,
+          "value": "YOUR_SLACK_USER_ID",
+          "mode": "list"
+        },
+        "text": "=🚨 *Speed To Lead — ACTION REQUIRED*\n\nAll 3 attempts to reach {{ $('Decide Exhausted').first().json.name }} ({{ $('Decide Exhausted').first().json.phone }}) went unanswered (calls plus a text).\n*What to do:* a team member should follow up. The lead is marked exhausted with the needs-follow-up flag on.",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        },
+        "resource": "message",
+        "operation": "post"
+      }
+    },
+    {
+      "id": "stx-notify-admin-email-exhausted",
+      "name": "Notify Admin Email Exhausted",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput",
+      "position": [
+        5680,
+        13104
+      ],
+      "parameters": {
+        "sendTo": "user@example.com",
+        "subject": "=Speed To Lead - ACTION REQUIRED - no contact after 3 attempts - {{ $('Decide Exhausted').first().json.phone }}",
+        "emailType": "text",
+        "message": "=All 3 attempts to reach {{ $('Decide Exhausted').first().json.name }} ({{ $('Decide Exhausted').first().json.phone }}) went unanswered (calls plus a text).\n\nWhat to do: a team member should follow up. The lead is marked exhausted and the needs-follow-up flag is on.",
+        "options": {
+          "appendAttribution": false
+        },
+        "resource": "message",
+        "operation": "send"
+      }
+    },
+    {
+      "id": "stl-c1-01",
+      "name": "Speed To Lead Call 1 Webhook",
+      "disabled": true,
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        -1296,
+        14208
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "YOUR_WEBHOOK_PATH",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "stl-c1-02",
+      "name": "Accept Call 1 Request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -1056,
+        14208
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"accepted\"\n}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "stl-c1-03",
+      "name": "Extract Outbound Lead Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -816,
+        14208
+      ],
+      "parameters": {
+        "jsCode": "// Extract Outbound Lead Fields - only the contact id is taken from GHL's webhook body; name and phone are re-read from GHL by id after the wait\n// (never trust the body). Never throws: bad input becomes `problem`.\nconst body = ($input.first().json || {}).body || {};\nconst contact_id = String(body.contact_id || body.contactId || body.id || '').trim();\nconst first_name = String(body.first_name || body.firstName || '').trim();\nconst last_name = String(body.last_name || body.lastName || '').trim();\nlet problem = '';\nif (!contact_id) problem = 'GHL sent no contact_id';\nelse if (!/^[A-Za-z0-9]{10,40}$/.test(contact_id)) problem = `contact_id \"${contact_id.slice(0, 60)}\" is not a valid GHL id`;\nreturn [{ json: { contact_id, first_name, last_name, valid: !problem, problem } }];\n"
+      }
+    },
+    {
+      "id": "stl-c1-04",
+      "name": "If Lead Fields Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -576,
+        14208
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "v1",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "stl-c1-05",
+      "name": "Wait 2 Minutes Before Call 1",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -336,
+        14160
+      ],
+      "parameters": {
+        "amount": 2,
+        "unit": "minutes"
+      }
+    },
+    {
+      "id": "stl-c1-06",
+      "name": "Get Contact For Call 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput",
+      "position": [
+        -96,
+        14160
+      ],
+      "parameters": {
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ encodeURIComponent($('Extract Outbound Lead Fields').first().json.contact_id) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "stl-c1-07",
+      "name": "Get Speed To Lead Settings",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        144,
+        14160
+      ],
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_CONFIG_TABLE_ID"
+        },
+        "returnAll": true
+      }
+    },
+    {
+      "id": "stl-c1-08",
+      "name": "Check Active Call Lock",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        384,
+        14160
+      ],
+      "parameters": {
+        "operation": "get",
+        "propertyName": "lockValue",
+        "key": "=activecall:{{ (($('Get Contact For Call 1').first().json.body || {}).contact || {}).phone || '' }}",
+        "keyType": "string",
+        "options": {}
+      }
+    },
+    {
+      "id": "stl-c1-09",
+      "name": "Decide Call 1 Allowed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        14160
+      ],
+      "parameters": {
+        "jsCode": "// Decide Call 1 Allowed - this workflow's own copy of the Contact Gate's speed-to-lead checks (Desert Comfort Contact Gate > Decide Gate,\n// 2026-10-30), Call 1 only. Reads through explicit node references, writes nothing. Fail-closed: anything that can't be checked denies.\n// alert = a person must look (the lead was NOT called for a reason that is not the lead's own choice). Quiet hours: Call 1 is exempt (Admin's rule).\nconst lead = $('Extract Outbound Lead Fields').first().json;\nconst base = { contact_id: lead.contact_id, phone: '', first_name: lead.first_name, last_name: lead.last_name, stage: '', room: '', allowed: false, alert: false, alert_text: '', decision: '', reason: '' };\nconst out = (decision, reason, extra = {}) => [{ json: { ...base, decision, reason, ...extra } }];\nconst denyAlert = (decision, reason) => out(decision, reason, { alert: true, alert_text: `Call 1 was NOT placed: ${reason}.` });\n\nconst cr = $('Get Contact For Call 1').first().json;\nif (cr.statusCode !== 200 || !cr.body || !cr.body.contact) return denyAlert('fetch_failed', `could not read contact ${lead.contact_id} from GHL (HTTP ${cr.statusCode})`);\nconst contact = cr.body.contact;\nbase.phone = String(contact.phone || '').trim();\nbase.first_name = String(contact.firstName || '').trim() || lead.first_name;\nbase.last_name = String(contact.lastName || '').trim() || lead.last_name;\n\nconst dnd = (contact.dndSettings && contact.dndSettings.Call) || {};\nif (String(dnd.status || '').toLowerCase() === 'active') return out('denied_dnd', 'Call DND is active on this contact');\n\nconst cfg = {};\ntry { for (const it of $('Get Speed To Lead Settings').all()) { const r = it.json || {}; if (r.key) cfg[String(r.key).trim()] = r.value; } } catch (e) { /* settings unreadable: the built-in defaults below apply */ }\nconst field = (id) => { const f = (contact.customFields || []).find((x) => x.id === id); return f ? String(f.value !== undefined ? f.value : (f.fieldValue ?? '')).trim().toLowerCase() : ''; };\nlet stage = field(cfg.stage_field_id || 'YOUR_GHL_FIELD_ID_STAGE');\nif (!stage) {\n  // contact from before the stage field existed: same legacy fallback as the Contact Gate\n  const legacy = field(cfg.lead_status_field_id || 'YOUR_GHL_FIELD_ID_LEAD_STATUS');\n  const booked = String(cfg.legacy_booked_statuses || 'booked_emergency,booked_standard').split(',').map((s) => s.trim());\n  stage = booked.includes(legacy) ? 'booked' : 'contact';\n}\nbase.stage = stage;\nconst eligible = String(cfg.speedtolead_eligible_stages || 'contact,lead').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);\nif (!eligible.includes(stage)) return out('denied_stage', `stage \"${stage}\" is not eligible for speed-to-lead (${eligible.join('/')})`);\n\nconst tag = String(cfg.human_contacted_tag || 'human-contacted').trim().toLowerCase();\nif ((contact.tags || []).map((t) => String(t).trim().toLowerCase()).includes(tag)) return out('denied_human_reached', `contact carries the \"${tag}\" tag: a team member already reached this lead`);\n\nif (!base.phone) return denyAlert('denied_no_phone', 'the contact has no phone number');\nif (!/^\\+1\\d{10}$/.test(base.phone)) return denyAlert('denied_bad_phone', `the contact's phone \"${base.phone.slice(0, 30)}\" is not a US number in +1XXXXXXXXXX form`);\n\nconst lockItem = $('Check Active Call Lock').first().json;\nif (!lockItem || lockItem.error) return denyAlert('lock_check_failed', `could not read the active-call lock (${lockItem && lockItem.error ? String(lockItem.error.message || lockItem.error).slice(0, 200) : 'no result'})`);\nif (lockItem.lockValue !== undefined && lockItem.lockValue !== null && String(lockItem.lockValue) !== '') return out('denied_active_call', 'this number is on a call or already being called');\n\nconst room = `out-_${base.phone.replace(/\\D/g, '')}_${lead.contact_id}-1-${Date.now()}`;\nreturn out('allowed', `Call 1 allowed (stage ${stage})`, { allowed: true, room });\n"
+      }
+    },
+    {
+      "id": "stl-c1-10",
+      "name": "Log Call 1 Gate Decision",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "onError": "continueRegularOutput",
+      "position": [
+        864,
+        14160
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_CONTACT_EVENTS_TABLE_ID"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "occurred_at": "={{ $now.toISO() }}",
+            "phone": "={{ $('Decide Call 1 Allowed').first().json.phone }}",
+            "contact_id": "={{ $('Decide Call 1 Allowed').first().json.contact_id }}",
+            "pillar": "speedtolead",
+            "source": "speedtolead_call1",
+            "event": "gate_check_call",
+            "event_id": "={{ 'stl-call1:' + $('Decide Call 1 Allowed').first().json.contact_id + ':' + Date.now() }}",
+            "from_stage": "",
+            "to_stage": "",
+            "decision": "={{ $('Decide Call 1 Allowed').first().json.decision }}",
+            "reason": "={{ $('Decide Call 1 Allowed').first().json.reason }}",
+            "detail": "={{ JSON.stringify({ attempt: 'call1', stage: $('Decide Call 1 Allowed').first().json.stage, allowed: $('Decide Call 1 Allowed').first().json.allowed, alerted: $('Decide Call 1 Allowed').first().json.alert, room: $('Decide Call 1 Allowed').first().json.room }) }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "stl-c1-11",
+      "name": "Route Call 1 Gate Decision",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1104,
+        14160
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "s1",
+                    "leftValue": "={{ $('Decide Call 1 Allowed').first().json.allowed }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Allowed"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "s2",
+                    "leftValue": "={{ $('Decide Call 1 Allowed').first().json.alert }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Needs A Person"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "stl-c1-12",
+      "name": "Sign LiveKit Request",
+      "type": "n8n-nodes-base.jwt",
+      "typeVersion": 1,
+      "onError": "continueErrorOutput",
+      "position": [
+        1344,
+        14080
+      ],
+      "parameters": {
+        "useJson": true,
+        "claimsJson": "={{ JSON.stringify({ iss: 'YOUR_LIVEKIT_API_KEY', sub: 'n8n-speedtolead', nbf: Math.floor(Date.now() / 1000) - 10, exp: Math.floor(Date.now() / 1000) + 600, video: { room: $('Decide Call 1 Allowed').first().json.room, roomAdmin: true, roomCreate: true } }) }}",
+        "options": {
+          "algorithm": "HS256"
+        }
+      }
+    },
+    {
+      "id": "stl-c1-13",
+      "name": "Fire Call 1 On LiveKit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "onError": "continueErrorOutput",
+      "position": [
+        1584,
+        14080
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-livekit-server.example.com/twirp/livekit.AgentDispatchService/CreateDispatch",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "REDACTED"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ agent_name: 'desert-comfort-outbound', room: $('Decide Call 1 Allowed').first().json.room, metadata: JSON.stringify({ phone: $('Decide Call 1 Allowed').first().json.phone, first_name: $('Decide Call 1 Allowed').first().json.first_name, last_name: $('Decide Call 1 Allowed').first().json.last_name, contact_id: $('Decide Call 1 Allowed').first().json.contact_id, attempt: 1 }) }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "stl-c1-alert",
+      "name": "Notify Admin Slack Call 1 Problem",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "position": [
+        1824,
+        14400
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "user",
+        "user": {
+          "__rl": true,
+          "value": "YOUR_SLACK_USER_ID",
+          "mode": "list"
+        },
+        "text": "=⚠️ *Desert Comfort Speed To Lead — Call 1 was NOT placed*\n\n*Contact:* {{ $('Extract Outbound Lead Fields').first().json.first_name }} {{ $('Extract Outbound Lead Fields').first().json.last_name }} ({{ $('Extract Outbound Lead Fields').first().json.contact_id || 'no contact id' }})\n*What happened:* {{ $json.alert_text || $json.problem || ($json.error && ($json.error.message || $json.error)) || 'unknown error' }}\n*Execution:* https://your-n8n-instance.example.com/workflow/{{ $workflow.id }}/executions/{{ $execution.id }}\n*Action Required:* This new lead has not been called. Check the contact in GHL and call them yourself if appropriate. Nothing retries automatically.",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      }
+    },
+    {
+      "id": "stl-c3-01",
+      "name": "Speed To Lead Call 3 Webhook",
+      "disabled": true,
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "onError": "continueRegularOutput",
+      "position": [
+        -1296,
+        14900
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "YOUR_WEBHOOK_PATH",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "stl-c3-02",
+      "name": "Accept Call 3 Request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -1056,
+        14900
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"accepted\"\n}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "stl-c3-03",
+      "name": "Extract Call 3 Lead Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -816,
+        14900
+      ],
+      "parameters": {
+        "jsCode": "// Extract Call 3 Lead Fields - only the contact id is taken from GHL's webhook body; name and phone are re-read from GHL by id after the wait\n// (never trust the body). Never throws: bad input becomes `problem`.\nconst body = ($input.first().json || {}).body || {};\nconst contact_id = String(body.contact_id || body.contactId || body.id || '').trim();\nconst first_name = String(body.first_name || body.firstName || '').trim();\nconst last_name = String(body.last_name || body.lastName || '').trim();\nlet problem = '';\nif (!contact_id) problem = 'GHL sent no contact_id';\nelse if (!/^[A-Za-z0-9]{10,40}$/.test(contact_id)) problem = `contact_id \"${contact_id.slice(0, 60)}\" is not a valid GHL id`;\nreturn [{ json: { contact_id, first_name, last_name, valid: !problem, problem } }];\n"
+      }
+    },
+    {
+      "id": "stl-c3-04",
+      "name": "If Call 3 Lead Fields Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -576,
+        14900
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "v1",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "stl-c3-06",
+      "name": "Get Contact For Call 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput",
+      "position": [
+        -336,
+        14900
+      ],
+      "parameters": {
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ encodeURIComponent($('Extract Call 3 Lead Fields').first().json.contact_id) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "stl-c3-07",
+      "name": "Get Settings For Call 3",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        -96,
+        14900
+      ],
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_CONFIG_TABLE_ID"
+        },
+        "returnAll": true
+      }
+    },
+    {
+      "id": "stl-c3-08",
+      "name": "Check Active Call Lock For Call 3",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        144,
+        14900
+      ],
+      "parameters": {
+        "operation": "get",
+        "propertyName": "lockValue",
+        "key": "=activecall:{{ (($('Get Contact For Call 3').first().json.body || {}).contact || {}).phone || '' }}",
+        "keyType": "string",
+        "options": {}
+      }
+    },
+    {
+      "id": "stl-c3-09",
+      "name": "Decide Call 3 Allowed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        384,
+        14900
+      ],
+      "parameters": {
+        "jsCode": "// Decide Call 3 Allowed - this workflow's own copy of the Contact Gate's speed-to-lead checks (Desert Comfort Contact Gate > Decide Gate,\n// 2026-10-30), Call 3 only. Reads through explicit node references, writes nothing. Fail-closed: anything that can't be checked denies.\n// alert = a person must look (the lead was NOT called for a reason that is not the lead's own choice). Quiet hours apply to Call 3.\nconst lead = $('Extract Call 3 Lead Fields').first().json;\nconst base = { contact_id: lead.contact_id, phone: '', first_name: lead.first_name, last_name: lead.last_name, stage: '', room: '', allowed: false, alert: false, alert_text: '', decision: '', reason: '' };\nconst out = (decision, reason, extra = {}) => [{ json: { ...base, decision, reason, ...extra } }];\nconst denyAlert = (decision, reason) => out(decision, reason, { alert: true, alert_text: `Call 3 was NOT placed: ${reason}.` });\n\nconst cr = $('Get Contact For Call 3').first().json;\nif (cr.statusCode !== 200 || !cr.body || !cr.body.contact) return denyAlert('fetch_failed', `could not read contact ${lead.contact_id} from GHL (HTTP ${cr.statusCode})`);\nconst contact = cr.body.contact;\nbase.phone = String(contact.phone || '').trim();\nbase.first_name = String(contact.firstName || '').trim() || lead.first_name;\nbase.last_name = String(contact.lastName || '').trim() || lead.last_name;\n\nconst dnd = (contact.dndSettings && contact.dndSettings.Call) || {};\nif (String(dnd.status || '').toLowerCase() === 'active') return out('denied_dnd', 'Call DND is active on this contact');\n\nconst cfg = {};\ntry { for (const it of $('Get Settings For Call 3').all()) { const r = it.json || {}; if (r.key) cfg[String(r.key).trim()] = r.value; } } catch (e) { /* settings unreadable: the built-in defaults below apply */ }\nconst field = (id) => { const f = (contact.customFields || []).find((x) => x.id === id); return f ? String(f.value !== undefined ? f.value : (f.fieldValue ?? '')).trim().toLowerCase() : ''; };\nlet stage = field(cfg.stage_field_id || 'YOUR_GHL_FIELD_ID_STAGE');\nif (!stage) {\n  // contact from before the stage field existed: same legacy fallback as the Contact Gate\n  const legacy = field(cfg.lead_status_field_id || 'YOUR_GHL_FIELD_ID_LEAD_STATUS');\n  const booked = String(cfg.legacy_booked_statuses || 'booked_emergency,booked_standard').split(',').map((s) => s.trim());\n  stage = booked.includes(legacy) ? 'booked' : 'contact';\n}\nbase.stage = stage;\nconst status = field(cfg.lead_status_field_id || 'YOUR_GHL_FIELD_ID_LEAD_STATUS');\nif (status !== 'no_answer_call_2') return out('denied_status_changed', `status is now \"${status || 'blank'}\", not no_answer_call_2: the lead was reached or updated since Call 2`);\nconst eligible = String(cfg.speedtolead_eligible_stages || 'contact,lead').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);\nif (!eligible.includes(stage)) return out('denied_stage', `stage \"${stage}\" is not eligible for speed-to-lead (${eligible.join('/')})`);\n\nconst tag = String(cfg.human_contacted_tag || 'human-contacted').trim().toLowerCase();\nif ((contact.tags || []).map((t) => String(t).trim().toLowerCase()).includes(tag)) return out('denied_human_reached', `contact carries the \"${tag}\" tag: a team member already reached this lead`);\n\nif (!base.phone) return denyAlert('denied_no_phone', 'the contact has no phone number');\nif (!/^\\+1\\d{10}$/.test(base.phone)) return denyAlert('denied_bad_phone', `the contact's phone \"${base.phone.slice(0, 30)}\" is not a US number in +1XXXXXXXXXX form`);\n\nconst lockItem = $('Check Active Call Lock For Call 3').first().json;\nif (!lockItem || lockItem.error) return denyAlert('lock_check_failed', `could not read the active-call lock (${lockItem && lockItem.error ? String(lockItem.error.message || lockItem.error).slice(0, 200) : 'no result'})`);\nif (lockItem.lockValue !== undefined && lockItem.lockValue !== null && String(lockItem.lockValue) !== '') return out('denied_active_call', 'this number is on a call or already being called');\n\nconst tz = cfg.timezone || 'America/Phoenix';\nconst qStart = String(cfg.speedtolead_quiet_start || '21:00').trim();\nconst qEnd = String(cfg.speedtolead_quiet_end || '08:00').trim();\nconst hm = DateTime.now().setZone(tz).toFormat('HH:mm');\nconst inQuiet = qStart <= qEnd ? (hm >= qStart && hm < qEnd) : (hm >= qStart || hm < qEnd);\nif (inQuiet) return denyAlert('denied_quiet_hours', `${hm} ${tz} is inside quiet hours ${qStart}-${qEnd}, so Call 3 was refused (GHL should hold it to legal hours)`);\n\nconst room = `out-_${base.phone.replace(/\\D/g, '')}_${lead.contact_id}-3-${Date.now()}`;\nreturn out('allowed', `Call 3 allowed (stage ${stage})`, { allowed: true, room });\n"
+      }
+    },
+    {
+      "id": "stl-c3-10",
+      "name": "Log Call 3 Gate Decision",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "onError": "continueRegularOutput",
+      "position": [
+        624,
+        14900
+      ],
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_CONTACT_EVENTS_TABLE_ID"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "occurred_at": "={{ $now.toISO() }}",
+            "phone": "={{ $('Decide Call 3 Allowed').first().json.phone }}",
+            "contact_id": "={{ $('Decide Call 3 Allowed').first().json.contact_id }}",
+            "pillar": "speedtolead",
+            "source": "speedtolead_call3",
+            "event": "gate_check_call",
+            "event_id": "={{ 'stl-call3:' + $('Decide Call 3 Allowed').first().json.contact_id + ':' + Date.now() }}",
+            "from_stage": "",
+            "to_stage": "",
+            "decision": "={{ $('Decide Call 3 Allowed').first().json.decision }}",
+            "reason": "={{ $('Decide Call 3 Allowed').first().json.reason }}",
+            "detail": "={{ JSON.stringify({ attempt: 'call3', stage: $('Decide Call 3 Allowed').first().json.stage, allowed: $('Decide Call 3 Allowed').first().json.allowed, alerted: $('Decide Call 3 Allowed').first().json.alert, room: $('Decide Call 3 Allowed').first().json.room }) }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "stl-c3-11",
+      "name": "Route Call 3 Gate Decision",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1104,
+        14900
+      ],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "s1",
+                    "leftValue": "={{ $('Decide Call 3 Allowed').first().json.allowed }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Allowed"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "s2",
+                    "leftValue": "={{ $('Decide Call 3 Allowed').first().json.alert }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Needs A Person"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "stl-c3-12",
+      "name": "Sign LiveKit Request For Call 3",
+      "type": "n8n-nodes-base.jwt",
+      "typeVersion": 1,
+      "onError": "continueErrorOutput",
+      "position": [
+        1344,
+        14820
+      ],
+      "parameters": {
+        "useJson": true,
+        "claimsJson": "={{ JSON.stringify({ iss: 'YOUR_LIVEKIT_API_KEY', sub: 'n8n-speedtolead', nbf: Math.floor(Date.now() / 1000) - 10, exp: Math.floor(Date.now() / 1000) + 600, video: { room: $('Decide Call 3 Allowed').first().json.room, roomAdmin: true, roomCreate: true } }) }}",
+        "options": {
+          "algorithm": "HS256"
+        }
+      }
+    },
+    {
+      "id": "stl-c3-13",
+      "name": "Fire Call 3 On LiveKit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "onError": "continueErrorOutput",
+      "position": [
+        1584,
+        14820
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://your-livekit-server.example.com/twirp/livekit.AgentDispatchService/CreateDispatch",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "REDACTED"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ agent_name: 'desert-comfort-outbound', room: $('Decide Call 3 Allowed').first().json.room, metadata: JSON.stringify({ phone: $('Decide Call 3 Allowed').first().json.phone, first_name: $('Decide Call 3 Allowed').first().json.first_name, last_name: $('Decide Call 3 Allowed').first().json.last_name, contact_id: $('Decide Call 3 Allowed').first().json.contact_id, attempt: 3, texted: true }) }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "stl-c3-alert",
+      "name": "Notify Admin Slack Call 3 Problem",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "position": [
+        1584,
+        15140
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "user",
+        "user": {
+          "__rl": true,
+          "value": "YOUR_SLACK_USER_ID",
+          "mode": "list"
+        },
+        "text": "=⚠️ *Desert Comfort Speed To Lead — Call 3 was NOT placed*\n\n*Contact:* {{ (($('Decide Call 3 Allowed').isExecuted ? ($('Decide Call 3 Allowed').first().json.first_name + ' ' + $('Decide Call 3 Allowed').first().json.last_name) : ($('Extract Call 3 Lead Fields').first().json.first_name + ' ' + $('Extract Call 3 Lead Fields').first().json.last_name)).trim()) || 'name not on file' }} ({{ $('Extract Call 3 Lead Fields').first().json.contact_id || 'no contact id' }})\n*What happened:* {{ ($('Decide Call 3 Allowed').isExecuted && $('Decide Call 3 Allowed').first().json.alert_text) || $json.problem || ($json.error && ($json.error.message || $json.error)) || 'unknown error' }}\n*Execution:* https://your-n8n-instance.example.com/workflow/{{ $workflow.id }}/executions/{{ $execution.id }}\n*Action Required:* This lead did not get Call 3. Check the contact in GHL and call them yourself if appropriate. Nothing retries automatically.",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      }
+    },
+    {
+      "id": "stl-c3-rm",
+      "name": "Remove Call 3 Tag",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput",
+      "position": [
+        864,
+        14900
+      ],
+      "parameters": {
+        "method": "DELETE",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ encodeURIComponent($('Extract Call 3 Lead Fields').first().json.contact_id) }}/tags",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tags: [String((($('Get Settings For Call 3').all().map((i) => i.json).find((r) => r.key === 'speedtolead_call3_tag')) || {}).value || 'speedtolead-call3').trim()] }) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Call End Speed To Lead Desert Comfort LiveKit": {
+      "main": [
+        [
+          {
+            "node": "Compute Expected Signature Speed To Lead Call End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Expected Signature Speed To Lead Call End": {
+      "main": [
+        [
+          {
+            "node": "If Signature Valid Speed To Lead Call End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Signature Valid Speed To Lead Call End": {
+      "main": [
+        [
+          {
+            "node": "Check Speed To Lead Report Done (Redis)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Determine Auth Failure Reason Speed To Lead Call End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Determine Auth Failure Reason Speed To Lead Call End": {
+      "main": [
+        [
+          {
+            "node": "Notify Admin Slack For Auth Failure Speed To Lead Call End",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond Unauthorized Speed To Lead Call End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Speed To Lead Report Done (Redis)": {
+      "main": [
+        [
+          {
+            "node": "Claim Speed To Lead Report Lease (Redis)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Speed To Lead Report Lease (Redis)": {
+      "main": [
+        [
+          {
+            "node": "Normalize Speed To Lead Report Claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Speed To Lead Report Claim": {
+      "main": [
+        [
+          {
+            "node": "If Speed To Lead Report Is New",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Speed To Lead Report Is New": {
+      "main": [
+        [
+          {
+            "node": "If Lead Number Usable Speed To Lead",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "If Call Check-Up Has Flags Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Duplicate Speed To Lead Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Lead Number Usable Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Build Contact Body Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Speed To Lead Number Unusable — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Speed To Lead Number Unusable — Build Report": {
+      "main": [
+        [
+          {
+            "node": "Notify Admin Slack Speed To Lead Write Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Speed To Lead Write Failed — Build Report": {
+      "main": [
+        [
+          {
+            "node": "Notify Admin Slack Speed To Lead Write Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Admin Slack Speed To Lead Write Failed": {
+      "main": [
+        [
+          {
+            "node": "Respond Call End Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Contact Body Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "If Report Has Contact Id Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Report Has Contact Id Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Update Contact Speed To Lead EOCR",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Upsert Contact Speed To Lead EOCR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Contact Speed To Lead EOCR": {
+      "main": [
+        [
+          {
+            "node": "Set Resolved Contact Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Speed To Lead Write Failed — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Contact Speed To Lead EOCR": {
+      "main": [
+        [
+          {
+            "node": "Set Resolved Contact Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Speed To Lead Write Failed — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Resolved Contact Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Build State Event Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build State Event Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Call State Writer Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call State Writer Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "If Red Flags Found Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Speed To Lead State Writer Failed — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Red Flags Found Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Notify Admin Slack Red Flags Speed To Lead",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Route Call Outcome Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route Call Outcome Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Admin Slack Red Flags Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Notify Admin Email Red Flags Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Speed To Lead State Writer Failed — Build Report": {
+      "main": [
+        [
+          {
+            "node": "Notify Admin Slack Speed To Lead State Writer Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Admin Slack Speed To Lead State Writer Failed": {
+      "main": [
+        [
+          {
+            "node": "If Red Flags Found Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Call Outcome Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Update GHL For Booked Emergency Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update GHL For Booked Standard Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update GHL For Qualified Not Booked Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update GHL For Transferred Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update GHL For Out Of Area Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update GHL For No Meaningful Conversation Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update GHL For Do Not Call Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update GHL For Dead Air Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update GHL For Callback Requested Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update GHL For No Answer Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update GHL For No Answer Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update GHL For No Answer Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Note And Messages Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Speed To Lead Unknown Outcome — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Speed To Lead Unknown Outcome — Build Report": {
+      "main": [
+        [
+          {
+            "node": "Notify Admin Slack Speed To Lead Write Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update GHL For Booked Emergency Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Build Note And Messages Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Speed To Lead Write Failed — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update GHL For Booked Standard Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Build Note And Messages Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Speed To Lead Write Failed — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update GHL For Qualified Not Booked Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Build Note And Messages Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Speed To Lead Write Failed — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update GHL For Transferred Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Build Note And Messages Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Speed To Lead Write Failed — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update GHL For Out Of Area Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Build Note And Messages Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Speed To Lead Write Failed — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update GHL For No Meaningful Conversation Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Build Note And Messages Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Speed To Lead Write Failed — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update GHL For Do Not Call Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Build Note And Messages Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Speed To Lead Write Failed — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update GHL For Dead Air Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Build Note And Messages Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Speed To Lead Write Failed — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update GHL For Callback Requested Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Build Note And Messages Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Speed To Lead Write Failed — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Note And Messages Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Create Note GHL Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Note GHL Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "If Report Message Wanted Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Speed To Lead Write Failed — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Report Message Wanted Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Notify Admin Slack For Speed To Lead Call",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Call End Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Admin Slack For Speed To Lead Call": {
+      "main": [
+        [
+          {
+            "node": "Notify Admin Email For Speed To Lead Call",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Speed To Lead Write Failed — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Admin Email For Speed To Lead Call": {
+      "main": [
+        [
+          {
+            "node": "Respond Call End Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Speed To Lead Write Failed — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Next Attempt Wanted Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Route Next Step By Attempt Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond Call End Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Mark Speed To Lead Report Done (Redis)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Speed To Lead Report Done (Redis)": {
+      "main": [
+        [
+          {
+            "node": "Clear Active Call Lock Speed To Lead (Redis)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Call Check-Up Has Flags Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Log Call Check-Up Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Call Check-Up Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "If Call Check-Up Has Red Flags Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Call Check-Up Has Red Flags Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Notify Admin Slack Call Check-Up Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Admin Slack Call Check-Up Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Notify Admin Email Call Check-Up Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear Active Call Lock Speed To Lead (Redis)": {
+      "main": [
+        [
+          {
+            "node": "If Next Attempt Wanted Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Speed To Lead Call 1 Webhook": {
+      "main": [
+        [
+          {
+            "node": "Accept Call 1 Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accept Call 1 Request": {
+      "main": [
+        [
+          {
+            "node": "Extract Outbound Lead Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Outbound Lead Fields": {
+      "main": [
+        [
+          {
+            "node": "If Lead Fields Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Lead Fields Valid": {
+      "main": [
+        [
+          {
+            "node": "Wait 2 Minutes Before Call 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Admin Slack Call 1 Problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 2 Minutes Before Call 1": {
+      "main": [
+        [
+          {
+            "node": "Get Contact For Call 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Contact For Call 1": {
+      "main": [
+        [
+          {
+            "node": "Get Speed To Lead Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Speed To Lead Settings": {
+      "main": [
+        [
+          {
+            "node": "Check Active Call Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Active Call Lock": {
+      "main": [
+        [
+          {
+            "node": "Decide Call 1 Allowed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide Call 1 Allowed": {
+      "main": [
+        [
+          {
+            "node": "Log Call 1 Gate Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Call 1 Gate Decision": {
+      "main": [
+        [
+          {
+            "node": "Route Call 1 Gate Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Call 1 Gate Decision": {
+      "main": [
+        [
+          {
+            "node": "Sign LiveKit Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Admin Slack Call 1 Problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign LiveKit Request": {
+      "main": [
+        [
+          {
+            "node": "Fire Call 1 On LiveKit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Admin Slack Call 1 Problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fire Call 1 On LiveKit": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Notify Admin Slack Call 1 Problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update GHL For No Answer Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Build Note And Messages Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Speed To Lead Write Failed — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Next Step By Attempt Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Get Settings For Call 2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Contact For Text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Contact For Exhausted",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Admin Slack Speed To Lead Problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Settings For Call 2": {
+      "main": [
+        [
+          {
+            "node": "Wait Before Call 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Before Call 2": {
+      "main": [
+        [
+          {
+            "node": "Get Contact For Call 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Contact For Call 2": {
+      "main": [
+        [
+          {
+            "node": "Check Active Call Lock For Call 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Active Call Lock For Call 2": {
+      "main": [
+        [
+          {
+            "node": "Decide Call 2 Allowed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide Call 2 Allowed": {
+      "main": [
+        [
+          {
+            "node": "Log Call 2 Gate Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Call 2 Gate Decision": {
+      "main": [
+        [
+          {
+            "node": "Route Call 2 Gate Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Call 2 Gate Decision": {
+      "main": [
+        [
+          {
+            "node": "Sign LiveKit Request For Call 2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Admin Slack Speed To Lead Problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign LiveKit Request For Call 2": {
+      "main": [
+        [
+          {
+            "node": "Fire Call 2 On LiveKit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Admin Slack Speed To Lead Problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fire Call 2 On LiveKit": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Notify Admin Slack Speed To Lead Problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Contact For Text": {
+      "main": [
+        [
+          {
+            "node": "Get Settings For Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Settings For Text": {
+      "main": [
+        [
+          {
+            "node": "Decide Text Allowed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide Text Allowed": {
+      "main": [
+        [
+          {
+            "node": "Log Text Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Text Decision": {
+      "main": [
+        [
+          {
+            "node": "Route Text Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Text Decision": {
+      "main": [
+        [
+          {
+            "node": "Build Text Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Add Call 3 Tag",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Admin Slack Speed To Lead Problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Text Message": {
+      "main": [
+        [
+          {
+            "node": "Send Text Speed To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Text Speed To Lead": {
+      "main": [
+        [
+          {
+            "node": "Add Call 3 Tag",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Admin Slack Speed To Lead Problem",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Add Call 3 Tag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Call 3 Tag": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Notify Admin Slack Speed To Lead Problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Contact For Exhausted": {
+      "main": [
+        [
+          {
+            "node": "Get Settings For Exhausted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Settings For Exhausted": {
+      "main": [
+        [
+          {
+            "node": "Decide Exhausted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide Exhausted": {
+      "main": [
+        [
+          {
+            "node": "If Exhausted Applies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Exhausted Applies": {
+      "main": [
+        [
+          {
+            "node": "Set Needs Human Follow-Up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Needs Human Follow-Up": {
+      "main": [
+        [
+          {
+            "node": "Notify Admin Slack Exhausted",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Admin Slack Speed To Lead Problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Admin Slack Exhausted": {
+      "main": [
+        [
+          {
+            "node": "Notify Admin Email Exhausted",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Admin Slack Speed To Lead Problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Admin Email Exhausted": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Notify Admin Slack Speed To Lead Problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Speed To Lead Call 3 Webhook": {
+      "main": [
+        [
+          {
+            "node": "Accept Call 3 Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accept Call 3 Request": {
+      "main": [
+        [
+          {
+            "node": "Extract Call 3 Lead Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Call 3 Lead Fields": {
+      "main": [
+        [
+          {
+            "node": "If Call 3 Lead Fields Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Call 3 Lead Fields Valid": {
+      "main": [
+        [
+          {
+            "node": "Get Contact For Call 3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Admin Slack Call 3 Problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Contact For Call 3": {
+      "main": [
+        [
+          {
+            "node": "Get Settings For Call 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Settings For Call 3": {
+      "main": [
+        [
+          {
+            "node": "Check Active Call Lock For Call 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Active Call Lock For Call 3": {
+      "main": [
+        [
+          {
+            "node": "Decide Call 3 Allowed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide Call 3 Allowed": {
+      "main": [
+        [
+          {
+            "node": "Log Call 3 Gate Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Call 3 Gate Decision": {
+      "main": [
+        [
+          {
+            "node": "Remove Call 3 Tag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove Call 3 Tag": {
+      "main": [
+        [
+          {
+            "node": "Route Call 3 Gate Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Call 3 Gate Decision": {
+      "main": [
+        [
+          {
+            "node": "Sign LiveKit Request For Call 3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Admin Slack Call 3 Problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign LiveKit Request For Call 3": {
+      "main": [
+        [
+          {
+            "node": "Fire Call 3 On LiveKit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Admin Slack Call 3 Problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fire Call 3 On LiveKit": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Notify Admin Slack Call 3 Problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "meta": {}
+}

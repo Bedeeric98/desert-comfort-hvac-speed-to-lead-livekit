@@ -1,0 +1,512 @@
+{
+  "name": "Desert Comfort Contact Gate",
+  "nodes": [
+    {
+      "id": "cg-00",
+      "name": "Receive Gate Check",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "cg-01",
+      "name": "Normalize Gate Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Normalize Gate Request - cleans and validates what the caller passed. Never throws: bad input becomes `invalid`.\nconst src = $input.first().json || {};\nconst clean = (v) => String(v === undefined || v === null ? '' : v).trim();\n\nconst contact_id = clean(src.contact_id);\nconst channelRaw = clean(src.channel).toLowerCase();\nconst CHANNEL_MAP = { call: 'Call', sms: 'SMS' };\nconst channel = CHANNEL_MAP[channelRaw] || '';\nconst pillar = clean(src.pillar) || 'receptionist';\n// attempt is only used by speed-to-lead (quiet-hours exemption); the receptionist never sends it.\nconst attempt = clean(src.attempt).toLowerCase();\nconst ATTEMPTS = ['call1', 'call2', 'text', 'call3'];\n\nlet invalid = '';\nif (!contact_id) invalid = 'missing contact_id';\nelse if (!/^[A-Za-z0-9]{10,40}$/.test(contact_id)) invalid = 'contact_id is not a valid GHL id';\nelse if (!channel) invalid = `channel must be \"Call\" or \"SMS\", got \"${clean(src.channel)}\"`;\nelse if (pillar === 'speedtolead' && !ATTEMPTS.includes(attempt)) invalid = `attempt must be one of ${ATTEMPTS.join('/')} for speedtolead, got \"${clean(src.attempt)}\"`;\n\nreturn [{ json: { contact_id, channel, pillar, attempt, invalid } }];\n"
+      }
+    },
+    {
+      "id": "cg-02",
+      "name": "Get Contact For Gate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput",
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ encodeURIComponent($('Normalize Gate Request').first().json.contact_id) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "cg-03",
+      "name": "Decide Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Decide Gate - Desert Comfort Contact Gate.\n// Pure decision logic, reads everything through explicit node references, writes NOTHING itself.\n// Fail-closed: anything that can't be evaluated denies and alerts, per the internal contact-state model section 4 item 7.\n// Receptionist path (pillar != speedtolead): DND check only, exactly as before.\n// Speed-to-lead path adds, in order: stage, human-reached-first tag, active-call lock, quiet hours (2026-10-30).\nconst req = $('Normalize Gate Request').first().json;\nconst base = { contact_id: req.contact_id, channel: req.channel, pillar: req.pillar, attempt: req.attempt || '', phone: '', stage: '', allowed: false, deferred: false, delay_until: '', decision: '', reason: '', alert: false, alert_text: '' };\n\nif (req.invalid) {\n  return [{ json: { ...base, decision: 'invalid_input', reason: req.invalid, alert: true, alert_text: `Contact Gate got an invalid request: ${req.invalid}.` } }];\n}\n\nconst cr = $('Get Contact For Gate').first().json;\nif (cr.statusCode !== 200 || !cr.body || !cr.body.contact) {\n  return [{ json: { ...base, decision: 'fetch_failed', reason: `GET contact returned ${cr.statusCode}`, alert: true,\n    alert_text: `Contact Gate could not read contact ${req.contact_id} (HTTP ${cr.statusCode}). Denying ${req.channel} to be safe (fail-closed).` } }];\n}\n\nconst contact = cr.body.contact;\nconst phone = contact.phone || '';\nconst dnd = (contact.dndSettings && contact.dndSettings[req.channel]) || {};\nconst suppressed = String(dnd.status || '').toLowerCase() === 'active';\n\n// NOTE: opt_in_exception (the internal contact-state model section 6) is deliberately not wired -- nothing sets it yet.\n\nif (suppressed) {\n  return [{ json: { ...base, phone, decision: 'denied_dnd', reason: `${req.channel} DND is active on this contact`, allowed: false } }];\n}\nif (req.pillar !== 'speedtolead') {\n  return [{ json: { ...base, phone, decision: 'allowed', reason: `${req.channel} DND is not active`, allowed: true } }];\n}\n\n// ---- speed-to-lead checks ----\nconst readNode = (name) => { try { const n = $(name); return n.isExecuted ? n : null; } catch (e) { return null; } };\nconst cfg = {};\nconst cfgNode = readNode('Get Gate Settings');\nif (cfgNode) for (const it of cfgNode.all()) { const r = it.json || {}; if (r.key) cfg[String(r.key).trim()] = r.value; }\nconst usedDefaults = !cfg.speedtolead_eligible_stages;\n\nconst field = (id) => { const f = (contact.customFields || []).find((x) => x.id === id); return f ? String(f.value !== undefined ? f.value : (f.fieldValue ?? '')).trim().toLowerCase() : ''; };\nlet stage = field(cfg.stage_field_id || 'YOUR_GHL_FIELD_ID_STAGE');\nif (!stage) {\n  // contact from before the stage field existed: fall back to the legacy lead status, same rule as the inbound lookup\n  const legacy = field(cfg.lead_status_field_id || 'YOUR_GHL_FIELD_ID_LEAD_STATUS');\n  const booked = String(cfg.legacy_booked_statuses || 'booked_emergency,booked_standard').split(',').map((s) => s.trim());\n  stage = booked.includes(legacy) ? 'booked' : 'contact';\n}\nconst eligible = String(cfg.speedtolead_eligible_stages || 'contact,lead').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);\nconst out = (decision, reason, extra = {}) => [{ json: { ...base, phone, stage, decision, reason, ...extra } }];\n\nif (!eligible.includes(stage)) return out('denied_stage', `stage \"${stage}\" is not eligible for speed-to-lead (${eligible.join('/')})`);\n\nconst tag = String(cfg.human_contacted_tag || 'human-contacted').trim().toLowerCase();\nif ((contact.tags || []).map((t) => String(t).trim().toLowerCase()).includes(tag)) return out('denied_human_reached', `contact carries the \"${tag}\" tag: a team member already reached this lead`);\n\nif (!phone) return out('denied_no_phone', 'contact has no phone number to dial');\n\nconst lock = readNode('Check Active Call (Redis)');\nconst lockItem = lock ? lock.first().json : null;\nif (!lockItem || lockItem.error) {\n  return out('lock_check_failed', 'could not read the active-call lock', { alert: true, alert_text: `Contact Gate could not read the active-call lock for ${req.contact_id} (${lockItem && lockItem.error ? String(lockItem.error.message || lockItem.error).slice(0, 200) : 'node did not run'}). Denying ${req.channel} (fail-closed).` });\n}\nif (lockItem.lockValue !== undefined && lockItem.lockValue !== null && String(lockItem.lockValue) !== '') return out('denied_active_call', 'this number is on a call or already being called');\n\nconst tz = cfg.timezone || 'America/Phoenix';\nconst qStart = String(cfg.speedtolead_quiet_start || '21:00').trim();\nconst qEnd = String(cfg.speedtolead_quiet_end || '08:00').trim();\nconst now = DateTime.now().setZone(tz);\nconst hm = now.toFormat('HH:mm');\nconst inQuiet = qStart <= qEnd ? (hm >= qStart && hm < qEnd) : (hm >= qStart || hm < qEnd);\nconst exempt = ['call1', 'call2'].includes(req.attempt);\nif (inQuiet && !exempt) {\n  const [eh, em] = qEnd.split(':').map(Number);\n  let until = now.set({ hour: eh, minute: em, second: 0, millisecond: 0 });\n  if (until <= now) until = until.plus({ days: 1 });\n  return out('deferred_quiet_hours', `${hm} ${tz} is inside quiet hours ${qStart}-${qEnd}; ${req.attempt} waits until ${qEnd}`, { deferred: true, delay_until: until.toISO() });\n}\n\nreturn out('allowed', `speed-to-lead ${req.attempt} allowed (stage ${stage}${inQuiet ? ', quiet-hours exempt' : ''}${usedDefaults ? ', built-in settings used' : ''})`, { allowed: true });\n"
+      }
+    },
+    {
+      "id": "cg-04",
+      "name": "If Gate Alert Needed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Decide Gate').first().json.alert }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "cg-06",
+      "name": "Write Gate Ledger Row",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_CONTACT_EVENTS_TABLE_ID"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "occurred_at": "={{ $now.toISO() }}",
+            "phone": "={{ $('Decide Gate').first().json.phone }}",
+            "contact_id": "={{ $('Decide Gate').first().json.contact_id }}",
+            "pillar": "={{ $('Decide Gate').first().json.pillar }}",
+            "source": "contact_gate",
+            "event": "={{ 'gate_check_' + $('Decide Gate').first().json.channel.toLowerCase() }}",
+            "event_id": "={{ 'gate:' + $('Decide Gate').first().json.contact_id + ':' + $('Decide Gate').first().json.channel + ':' + Date.now() }}",
+            "from_stage": "",
+            "to_stage": "",
+            "decision": "={{ $('Decide Gate').first().json.decision }}",
+            "reason": "={{ $('Decide Gate').first().json.reason }}",
+            "detail": "={{ JSON.stringify({ channel: $('Decide Gate').first().json.channel, pillar: $('Decide Gate').first().json.pillar, attempt: $('Decide Gate').first().json.attempt, stage: $('Decide Gate').first().json.stage, allowed: $('Decide Gate').first().json.allowed, deferred: $('Decide Gate').first().json.deferred, delay_until: $('Decide Gate').first().json.delay_until, alerted: $('Decide Gate').first().json.alert }) }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      }
+    },
+    {
+      "id": "cg-07",
+      "name": "Return Gate Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "g1",
+              "name": "allowed",
+              "value": "={{ $('Decide Gate').first().json.allowed }}",
+              "type": "boolean"
+            },
+            {
+              "id": "g2",
+              "name": "decision",
+              "value": "={{ $('Decide Gate').first().json.decision }}",
+              "type": "string"
+            },
+            {
+              "id": "g3",
+              "name": "reason",
+              "value": "={{ $('Decide Gate').first().json.reason }}",
+              "type": "string"
+            },
+            {
+              "id": "g4",
+              "name": "contact_id",
+              "value": "={{ $('Decide Gate').first().json.contact_id }}",
+              "type": "string"
+            },
+            {
+              "id": "g5",
+              "name": "channel",
+              "value": "={{ $('Decide Gate').first().json.channel }}",
+              "type": "string"
+            },
+            {
+              "id": "g6",
+              "name": "pillar",
+              "value": "={{ $('Decide Gate').first().json.pillar }}",
+              "type": "string"
+            },
+            {
+              "id": "g7",
+              "name": "deferred",
+              "value": "={{ $('Decide Gate').first().json.deferred }}",
+              "type": "boolean"
+            },
+            {
+              "id": "g8",
+              "name": "delay_until",
+              "value": "={{ $('Decide Gate').first().json.delay_until }}",
+              "type": "string"
+            },
+            {
+              "id": "g9",
+              "name": "stage",
+              "value": "={{ $('Decide Gate').first().json.stage }}",
+              "type": "string"
+            },
+            {
+              "id": "g10",
+              "name": "attempt",
+              "value": "={{ $('Decide Gate').first().json.attempt }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      }
+    },
+    {
+      "id": "327edc07-718e-4683-b816-52b47da61304",
+      "name": "Notify Admin Slack Gate Alert — Build Report",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1200,
+        -260
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1",
+              "name": "execution",
+              "type": "object",
+              "value": "={{ { id: $execution.id, url: 'https://your-n8n-instance.example.com/workflow/' + $workflow.id + '/executions/' + $execution.id, lastNodeExecuted: 'Decide Gate', error: { message: $('Decide Gate').first().json.alert_text, httpCode: '' } } }}"
+            },
+            {
+              "id": "e2",
+              "name": "workflow",
+              "type": "object",
+              "value": "={{ { id: $workflow.id, name: $workflow.name } }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "cb75b70c-6f62-4218-9ea5-6eefcf6341bb",
+      "name": "Notify Admin Slack Gate Alert",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1200,
+        -380
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "YOUR_ERROR_WORKFLOW_ID",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
+    },
+    {
+      "id": "cg-08",
+      "name": "If Speed To Lead Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        600,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "stl1",
+              "leftValue": "={{ $('Normalize Gate Request').first().json.pillar === 'speedtolead' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "cg-09",
+      "name": "Get Gate Settings",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        840,
+        -120
+      ],
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_CONFIG_TABLE_ID"
+        },
+        "returnAll": true
+      }
+    },
+    {
+      "id": "cg-10",
+      "name": "Check Active Call (Redis)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "onError": "continueRegularOutput",
+      "position": [
+        1080,
+        -120
+      ],
+      "parameters": {
+        "operation": "get",
+        "propertyName": "lockValue",
+        "key": "=activecall:{{ $('Get Contact For Gate').first().json.body?.contact?.phone ?? '' }}",
+        "keyType": "string",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Receive Gate Check": {
+      "main": [
+        [
+          {
+            "node": "Normalize Gate Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Gate Request": {
+      "main": [
+        [
+          {
+            "node": "Get Contact For Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide Gate": {
+      "main": [
+        [
+          {
+            "node": "If Gate Alert Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Gate Alert Needed": {
+      "main": [
+        [
+          {
+            "node": "Notify Admin Slack Gate Alert — Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Write Gate Ledger Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Gate Ledger Row": {
+      "main": [
+        [
+          {
+            "node": "Return Gate Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Admin Slack Gate Alert — Build Report": {
+      "main": [
+        [
+          {
+            "node": "Notify Admin Slack Gate Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Admin Slack Gate Alert": {
+      "main": [
+        [
+          {
+            "node": "Write Gate Ledger Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Contact For Gate": {
+      "main": [
+        [
+          {
+            "node": "If Speed To Lead Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Speed To Lead Gate": {
+      "main": [
+        [
+          {
+            "node": "Get Gate Settings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Decide Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Gate Settings": {
+      "main": [
+        [
+          {
+            "node": "Check Active Call (Redis)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Active Call (Redis)": {
+      "main": [
+        [
+          {
+            "node": "Decide Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "meta": {}
+}

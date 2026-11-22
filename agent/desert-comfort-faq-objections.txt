@@ -1,0 +1,56 @@
+<documents>
+<doc id=1 category="Pricing and Service Tiers">
+Question: Why is the emergency fee so high? / One hundred and twenty dollars just to look at it? / That seems really expensive
+Answer: I hear you. The one hundred and twenty dollar emergency fee gets a technician to you within ninety minutes - your call goes to the front of the line. If you decide not to go ahead with the repair, that fee is what you pay for the visit. If you do go ahead, it's waived and rolled into the total. And you'll get a firm quote before any work starts, so there are no surprises.
+</doc>
+
+<doc id=2 category="Remote Diagnosis">
+Question: Can't you just tell me what's wrong over the phone? / Can you diagnose it remotely?
+Answer: I wish I could! There are a lot of things that can cause this, and the only way to know for sure is for a technician to test the system in person with the right tools. Once they've found the problem, you'll get a firm quote before any work starts.
+</doc>
+
+<doc id=3 category="Pricing and Service Tiers">
+Question: Other companies quoted me less / I saw seventy-nine dollar service calls advertised / Your prices are higher than competitors
+Answer: I hear you - nobody wants to overpay. The trip fee covers the technician coming out and diagnosing the problem. If you decide not to go ahead with the repair, that fee is what you pay for the visit. If you do go ahead, it's waived and rolled into the total. And you'll get a firm quote before any work starts, so you can decide with no surprises.
+</doc>
+
+<doc id=4 category="Pricing and Estimates">
+Question: How much will the actual repair cost? / What's this going to cost to fix? / Give me a repair estimate
+Answer: That depends on what's wrong, so I can't put a number on the repair from here. The technician will diagnose it on site and give you a firm quote before starting any work, and you're never obligated to approve it. If you decide not to go ahead, the trip fee is what you pay for the visit. If you do go ahead, it's waived and rolled into the total.
+</doc>
+
+<doc id=5 category="Response Time">
+Question: Can you come sooner? / Ninety minutes is too long / I need someone now / Can't you get here faster?
+Answer: I completely understand - waiting in the heat is miserable, and I wish I could get someone there sooner. The time I gave you really is the fastest we can get a technician to you, and it's a time you can count on.
+</doc>
+
+<doc id=6 category="Warranty and Coverage">
+Question: What if it's still under warranty? / Is this covered under warranty? / My system has a warranty
+Answer: Good question. Warranty coverage is something I can't speak about, so I'll have a team member follow up with you about it. That doesn't need to hold anything up on getting your AC looked at.
+</doc>
+
+<doc id=7 category="Decision Making">
+Question: I need to talk to my husband first / I need to talk to my wife first / I need to check with my spouse / Let me discuss this with my partner
+Answer: Of course - it makes sense to talk it over. Holding a spot doesn't lock you in: if you decide against it after talking it over, just call us back and we'll cancel it.
+</doc>
+
+<doc id=8 category="DIY Solutions">
+Question: Can I just try fixing it myself first? / I want to troubleshoot it myself / Let me try to fix it before calling someone out
+Answer: Of course, that makes sense. I'm not able to walk you through fixes over the phone, but our technicians can find exactly what's wrong and get it sorted for you.
+</doc>
+
+<doc id=9 category="Trust and Credibility">
+Question: How do I know you're legit? / How do I know you're not a scam? / Are you really from Desert Comfort? / Can I trust you?
+Answer: Totally fair question. I'm Desert Comfort's digital assistant, and you're welcome to look us up on Google any time. Whoever comes out will be from Desert Comfort, and you'll get a firm quote before any work starts, so nothing happens without your say-so.
+</doc>
+
+<doc id=10 category="Rental and Landlord Issues">
+Question: I'm renting - shouldn't my landlord pay for this? / This is a rental property / My landlord should handle this / I don't own this property
+Answer: Got it - we usually work directly with homeowners, but I'll have someone from our team give you a call to go over your options.
+</doc>
+
+<doc id=11 category="Business Hours">
+Question: What are your hours? / When do you open? / What time do you close? / Are you open right now?
+Answer: Our office is open from eight in the morning to seven in the evening, Monday through Friday, Phoenix time, and closed on weekends. For AC emergencies, you can reach us any time, day or night.
+</doc>
+</documents>
